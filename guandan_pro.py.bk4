@@ -1,0 +1,286 @@
+from flask import Flask, render_template_string, request, redirect, url_for, session, flash
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
+import random
+
+app = Flask(__name__)
+app.secret_key = "guandan_v13_2_final"
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///guandan_pro_v13_2.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
+# --- 1. 数据库模型 ---
+class SystemConfig(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    current_round = db.Column(db.Integer, default=1)
+    total_rounds = db.Column(db.Integer, default=5)
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True)
+    password = db.Column(db.String(50))
+
+class Team(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True)
+    players = db.Column(db.String(200)) # 存储格式：姓名1,姓名2
+    current_score = db.Column(db.Integer, default=0) # 胜负积分
+    round_score = db.Column(db.Integer, default=0)    # 级分
+    history_opponents = db.Column(db.Text, default="") 
+
+class Match(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    round_no = db.Column(db.Integer)
+    table_no = db.Column(db.Integer)
+    team_a_id = db.Column(db.Integer)
+    team_b_id = db.Column(db.Integer)
+    team_a_name = db.Column(db.String(50))
+    team_b_name = db.Column(db.String(50))
+    # 方位对应的具体姓名
+    pos_east = db.Column(db.String(50))
+    pos_west = db.Column(db.String(50))
+    pos_north = db.Column(db.String(50))
+    pos_south = db.Column(db.String(50))
+    is_completed = db.Column(db.Boolean, default=False)
+    winner_id = db.Column(db.Integer, nullable=True)
+
+class AuditLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.now)
+    user = db.Column(db.String(50))
+    action = db.Column(db.String(100))
+    details = db.Column(db.Text)
+
+# --- 2. 核心算法逻辑 ---
+def get_config():
+    conf = SystemConfig.query.first()
+    if not conf:
+        conf = SystemConfig(); db.session.add(conf); db.session.commit()
+    return conf
+
+def log_act(action, details=""):
+    log = AuditLog(user=session.get('username','System'), action=action, details=details)
+    db.session.add(log); db.session.commit()
+
+def swiss_pairing(round_no):
+    teams = Team.query.all()
+    teams.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
+    paired = []; used = set()
+    total_r = get_config().total_rounds
+    for i in range(len(teams)):
+        if teams[i].id in used: continue
+        found = False
+        for j in range(i + 1, len(teams)):
+            if teams[j].id in used: continue
+            history = teams[i].history_opponents.split(',') if teams[i].history_opponents else []
+            if str(teams[j].id) not in history or round_no >= total_r:
+                paired.append((teams[i], teams[j])); used.add(teams[i].id); used.add(teams[j].id)
+                found = True; break
+        if not found and i < len(teams) - 1:
+            for k in range(i + 1, len(teams)):
+                if teams[k].id not in used:
+                    paired.append((teams[i], teams[k])); used.add(teams[i].id); used.add(teams[k].id); break
+    return paired
+
+# --- 3. 布局与样式 ---
+def render_master(content, active=""):
+    conf = get_config()
+    navs = [('setup','赛事设置'),('matches','全景面板'),('leaderboard','积分榜'),('users','系统管理'),('logs','审计日志')]
+    nav_html = "".join([f'<li class="nav-item"><a class="nav-link {"active fw-bold text-info" if active==n[0] else ""}" href="/{n[0]}">{n[1]}</a></li>' for n in navs])
+    
+    return render_template_string(f"""
+    <!DOCTYPE html><html><head><meta charset="UTF-8"><title>MASTER PANEL V13.2</title>
+    <link href="https://cdn.staticfile.org/twitter-bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.staticfile.org/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <style>
+        body {{ background: #020617; color: #f8fafc; font-family: 'Microsoft YaHei'; }}
+        .navbar {{ background: #0b1120 !important; border-bottom: 1px solid #1e293b; padding: 15px 0; }}
+        .navbar-brand {{ font-size: 1.5rem; letter-spacing: 1px; }}
+        .card {{ background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; }}
+        
+        /* 计时器发光效果 */
+        #timer-box {{ background: #0f172a; padding: 15px 40px; border-radius: 60px; border: 1px solid #3b82f6; display: flex; align-items: center; gap: 25px; box-shadow: 0 0 25px rgba(59,130,246,0.4); margin: 0 auto 30px; width: fit-content; }}
+        #time-display {{ font-family: 'Segoe UI', sans-serif; font-size: 3rem; font-weight: bold; color: #60a5fa; min-width: 160px; text-align: center; text-shadow: 0 0 10px rgba(96,165,250,0.5); }}
+        .timer-input {{ width: 60px; background: #020617; border: 1px solid #334155; color: white; text-align: center; border-radius: 5px; }}
+        
+        /* 全景对阵卡片 */
+        .seat-grid {{ display: grid; grid-template-areas: ". north ." "west table east" ". south ."; grid-template-columns: 1fr 65px 1fr; gap: 10px; background: #0b1120; padding: 25px; border-radius: 12px; position: relative; }}
+        .table-circle {{ grid-area: table; background: #4361ee; border-radius: 50%; height: 55px; width: 55px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.3s; color: white; font-weight: bold; font-size: 1.2rem; margin: auto; box-shadow: 0 0 15px rgba(67,97,238,0.4); }}
+        .table-circle:hover {{ transform: scale(1.1); background: #4895ef; box-shadow: 0 0 20px #3f37c9; }}
+        .p-name {{ display: block; font-weight: bold; font-size: 1rem; color: #f8fafc; text-align: center; margin-top: 2px; }}
+        .p-dir {{ font-size: 0.7rem; color: #64748b; text-align: center; display: block; text-transform: uppercase; font-weight: bold; }}
+        
+        .round-info {{ position: absolute; top: 18px; right: 30px; color: #ef4444; font-size: 1.5rem; font-weight: bold; border: 1px solid #ef4444; padding: 2px 15px; border-radius: 5px; }}
+        .modal-content {{ background: #0f172a; color: white; border: 1px solid #3b82f6; box-shadow: 0 0 30px rgba(0,0,0,0.5); }}
+        .btn-success {{ background-color: #10b981; border: none; }}
+        .btn-warning {{ background-color: #f59e0b; border: none; }}
+    </style>
+    <script>
+        let timer; let timeLeft;
+        function startTimer() {{
+            if(timer) clearInterval(timer);
+            let mins = document.getElementById('duration').value;
+            if(!timeLeft && timeLeft !== 0) timeLeft = mins * 60;
+            timer = setInterval(() => {{
+                if(timeLeft <= 0) {{ clearInterval(timer); document.getElementById('time-display').innerText = "时间到"; }}
+                else {{ timeLeft--; let m = Math.floor(timeLeft/60), s = timeLeft%60; document.getElementById('time-display').innerText = (m<10?'0'+m:m)+":"+(s<10?'0'+s:s); }}
+            }}, 1000);
+        }}
+        function pauseTimer() {{ clearInterval(timer); }}
+        function resetTimer() {{ clearInterval(timer); timeLeft=null; document.getElementById('time-display').innerText="计时准备"; }}
+    </script></head>
+    <body>
+        <nav class="navbar navbar-expand-lg navbar-dark mb-4"><div class="container-fluid">
+        <a class="navbar-brand fw-bold" href="/">🏆 MASTER PANEL</a>
+        <div class="collapse navbar-collapse"><ul class="navbar-nav me-auto">{nav_html}</ul>
+        <a href="/logout" class="btn btn-outline-danger btn-sm border-0">退出</a></div></div></nav>
+        <div class="container-fluid px-5">
+            <div class="round-info">第 {conf.current_round} 轮比赛</div>
+            {content}
+        </div>
+    </body></html>
+    """, active=active)
+
+# --- 4. 路由逻辑 ---
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        u = User.query.filter_by(username=request.form['u'], password=request.form['p']).first()
+        if u: session['logged_in']=True; session['username']=u.username; return redirect(url_for('matches'))
+    return render_master('<div class="row justify-content-center mt-5"><div class="col-md-3 card p-4"><h4>管理员登录</h4><form method="post"><input name="u" class="form-control mb-2 bg-dark text-white"><input type="password" name="p" class="form-control mb-3 bg-dark text-white"><button class="btn btn-primary w-100">进入系统</button></form></div></div>')
+
+@app.route('/setup', methods=['GET', 'POST'])
+def setup():
+    conf = get_config()
+    if request.method == 'POST':
+        if 'total_r' in request.form:
+            conf.total_rounds = int(request.form['total_r']); db.session.commit(); log_act("设置轮次", f"总轮次设为{conf.total_rounds}")
+        elif 'team_n' in request.form:
+            db.session.add(Team(name=request.form['team_n'], players=request.form['team_p']))
+            db.session.commit(); log_act("添加队伍", request.form['team_n'])
+    teams = Team.query.all()
+    rows = "".join([f"<tr><td>{t.name}</td><td>{t.players}</td><td><a href='/del_t/{t.id}' class='text-danger'>删除</a></td></tr>" for t in teams])
+    return render_master(f"""
+    <div class="row"><div class="col-md-4 card p-3"><h5>赛制管理</h5>
+    <form method="post" class="mb-3"><label class="small">比赛轮数：</label><div class="input-group"><input name="total_r" type="number" class="form-control bg-dark text-white border-secondary" value="{conf.total_rounds}"><button class="btn btn-info px-4">设定</button></div></form>
+    <hr><h5>队伍录入</h5><form method="post"><input name="team_n" class="form-control mb-2 bg-dark text-white border-secondary" placeholder="参赛队名 (如: 江苏省队)"><input name="team_p" class="form-control mb-3 bg-dark text-white border-secondary" placeholder="队员姓名 (如: 张三,李四)"><button class="btn btn-success w-100 fw-bold">确认录入</button></form>
+    <a href="/init_game" class="btn btn-warning w-100 mt-4 fw-bold shadow">🎲 生成第一轮对阵</a></div>
+    <div class="col-md-8 px-4"><h5>已报名队伍 ({len(teams)})</h5><table class="table table-dark table-hover small"><thead><tr><th>队名</th><th>队员</th><th>管理</th></tr></thead><tbody>{rows}</tbody></table></div></div>
+    """, "setup")
+
+@app.route('/init_game')
+def init_game():
+    conf = get_config(); conf.current_round = 1
+    Match.query.delete(); teams = Team.query.all(); random.shuffle(teams)
+    for i in range(0, len(teams)-1, 2):
+        t1, t2 = teams[i], teams[i+1]; p1 = t1.players.replace('，',',').split(','); p2 = t2.players.replace('，',',').split(',')
+        db.session.add(Match(round_no=1, table_no=(i//2+1), team_a_id=t1.id, team_b_id=t2.id, team_a_name=t1.name, team_b_name=t2.name,
+                             pos_east=p1[0] if len(p1)>0 else "选手1", pos_west=p1[1] if len(p1)>1 else "选手2", 
+                             pos_north=p2[0] if len(p2)>0 else "选手3", pos_south=p2[1] if len(p2)>1 else "选手4"))
+    db.session.commit(); log_act("开启赛事", "生成第一轮随机编排"); return redirect(url_for('matches'))
+
+@app.route('/')
+@app.route('/matches')
+def matches():
+    if not session.get('logged_in'): return redirect(url_for('login'))
+    conf = get_config()
+    ms = Match.query.filter_by(round_no=conf.current_round).all()
+    timer_html = """<div id="timer-box"><div class="text-center small text-secondary">设定(分)<br><input type="number" id="duration" class="timer-input" value="50"></div><div id="time-display">计时准备</div><div class="btn-group gap-1"><button onclick="startTimer()" class="btn btn-success px-3">开始比赛</button><button onclick="pauseTimer()" class="btn btn-warning px-3">暂停</button><button onclick="resetTimer()" class="btn btn-outline-light px-3">重置</button></div></div>"""
+    cards = ""
+    for m in ms:
+        card_style = "border-info" if m.is_completed else "border-secondary"
+        opacity = "opacity: 0.6;" if m.is_completed else ""
+        cards += f"""<div class="col-md-4 mb-4" style="{opacity}"><div class="card p-2 {card_style}">
+        <div class="seat-grid">
+            <div style="grid-area:north;"><span class="p-dir">北</span><span class="p-name">{m.pos_north}</span></div>
+            <div style="grid-area:west;"><span class="p-dir">西</span><span class="p-name">{m.pos_west}</span></div>
+            <div class="table-circle" data-bs-toggle="modal" data-bs-target="#m{m.id}">{m.table_no}</div>
+            <div style="grid-area:east;"><span class="p-dir">东</span><span class="p-name">{m.pos_east}</span></div>
+            <div style="grid-area:south;"><span class="p-dir">南</span><span class="p-name">{m.pos_south}</span></div>
+        </div><div class="text-center mt-3 text-secondary small fw-bold">{m.team_a_name} <span class="text-info">VS</span> {m.team_b_name}</div></div></div>
+        <div class="modal fade" id="m{m.id}"><div class="modal-dialog"><div class="modal-content"><div class="modal-header border-0"><h5>桌号 {m.table_no} 录分与判罚</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <form action="/save/{m.id}" method="post"><div class="modal-body">
+            <div class="row mb-4"><div class="col-6"><label class="mb-2">{m.team_a_name} 级分</label><input name="sa" type="number" class="form-control" placeholder="1-12分" required></div><div class="col-6"><label class="mb-2">{m.team_b_name} 级分</label><input name="sb" type="number" class="form-control" placeholder="1-12分" required></div></div>
+            <h6 class="text-danger mb-3">弃权判罚</h6>
+            <div class="form-check mb-2"><input class="form-check-input" type="radio" name="abs" value="A" id="absA{m.id}"><label class="form-check-label" for="absA{m.id}">{m.team_a_name} 弃权 (对方得3+6分)</label></div>
+            <div class="form-check mb-2"><input class="form-check-input" type="radio" name="abs" value="B" id="absB{m.id}"><label class="form-check-label" for="absB{m.id}">{m.team_b_name} 弃权 (对方得3+6分)</label></div>
+            <div class="form-check"><input class="form-check-input" type="radio" name="abs" value="None" id="absN{m.id}" checked><label class="form-check-label" for="absN{m.id}">正常完赛</label></div>
+        </div><div class="modal-footer border-0"><button class="btn btn-primary px-5">提交成绩</button></div></form></div></div></div>"""
+    
+    next_btn = f'<div class="text-center mt-4"><a href="/next_r" class="btn btn-danger btn-lg px-5 py-3 fw-bold shadow">🏁 完成本轮，进入下一轮瑞士轮分配</a></div>' if ms and all(m.is_completed for m in ms) else ""
+    return render_master(timer_html + f'<div class="row px-3">{cards}</div>' + next_btn, "matches")
+
+@app.route('/save/<int:mid>', methods=['POST'])
+def save(mid):
+    m = Match.query.get(mid); t1 = Team.query.get(m.team_a_id); t2 = Team.query.get(m.team_b_id)
+    abs_v = request.form.get('abs')
+    if abs_v == 'A':
+        t2.current_score += 3; t2.round_score += 6; m.winner_id = t2.id
+    elif abs_v == 'B':
+        t1.current_score += 3; t1.round_score += 6; m.winner_id = t1.id
+    else:
+        sa, sb = int(request.form.get('sa',0)), int(request.form.get('sb',0))
+        t1.round_score += sa; t2.round_score += sb
+        if sa > sb: t1.current_score += 3; m.winner_id = t1.id
+        else: t2.current_score += 3; m.winner_id = t2.id
+    m.is_completed = True
+    t1.history_opponents = (t1.history_opponents + f",{t2.id}").strip(',')
+    t2.history_opponents = (t2.history_opponents + f",{t1.id}").strip(',')
+    db.session.commit(); log_act("录分", f"桌{m.table_no} 录入完毕"); return redirect(url_for('matches'))
+
+@app.route('/next_r')
+def next_r():
+    conf = get_config()
+    if conf.current_round >= conf.total_rounds: return redirect(url_for('leaderboard'))
+    conf.current_round += 1; pairs = swiss_pairing(conf.current_round)
+    for i, (t1, t2) in enumerate(pairs):
+        p1 = t1.players.replace('，',',').split(','); p2 = t2.players.replace('，',',').split(',')
+        db.session.add(Match(round_no=conf.current_round, table_no=i+1, team_a_id=t1.id, team_b_id=t2.id, team_a_name=t1.name, team_b_name=t2.name,
+                             pos_east=p1[0] if len(p1)>0 else "选手1", pos_west=p1[1] if len(p1)>1 else "选手2", 
+                             pos_north=p2[0] if len(p2)>0 else "选手3", pos_south=p2[1] if len(p2)>1 else "选手4"))
+    db.session.commit(); log_act("下一轮", f"进入第{conf.current_round}轮"); return redirect(url_for('matches'))
+
+@app.route('/leaderboard')
+def leaderboard():
+    ts = Team.query.all()
+    ts.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
+    rows = ""
+    for i, t in enumerate(ts):
+        medal = "🥇" if i==0 else "🥈" if i==1 else "🥉" if i==2 else f"{i+1}"
+        rows += f"<tr><td>{medal}</td><td class='fw-bold'>{t.name}</td><td class='text-info'>{t.current_score}</td><td class='text-warning'>{t.round_score}</td></tr>"
+    return render_master(f"""<div class="row justify-content-center"><div class="col-md-9 card p-4">
+        <h4 class="text-center mb-4 text-info">🏆 赛事总积分榜 (当前积分优先)</h4>
+        <table class="table table-dark table-hover text-center">
+            <thead><tr><th>排名</th><th>参赛队名</th><th>胜负积分 (当前积分)</th><th>级分累计 (轮次积分)</th></tr></thead>
+            <tbody>{rows}</tbody>
+        </table></div></div>""", "leaderboard")
+
+@app.route('/users', methods=['GET', 'POST'])
+def users():
+    if not session.get('logged_in'): return redirect(url_for('login'))
+    if request.method == 'POST':
+        db.session.add(User(username=request.form['u'], password=request.form['p'])); db.session.commit()
+    us = User.query.all(); rows = "".join([f"<tr><td>{u.username}</td><td><a href='/del_u/{u.id}' class='text-danger'>注销</a></td></tr>" for u in us])
+    return render_master(f'<div class="row"><div class="col-md-4 card p-3"><h5>账户管理</h5><form method="post"><input name="u" class="form-control mb-2 bg-dark text-white border-secondary" placeholder="用户名"><input name="p" class="form-control mb-3 bg-dark text-white border-secondary" placeholder="初始密码"><button class="btn btn-primary w-100">添加人员</button></form></div><div class="col-md-8 px-4"><table class="table table-dark small"><thead><tr><th>用户名</th><th>操作</th></tr></thead><tbody>{rows}</tbody></table></div></div>', "users")
+
+@app.route('/logs')
+def logs():
+    if not session.get('logged_in'): return redirect(url_for('login'))
+    ls = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(100).all()
+    rows = "".join([f"<tr><td>{l.timestamp.strftime('%H:%M:%S')}</td><td>{l.user}</td><td>{l.action}</td><td>{l.details}</td></tr>" for l in ls])
+    return render_master(f'<h5>审计跟踪</h5><div class="card p-3"><table class="table table-dark table-hover small"><thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>详情</th></tr></thead><tbody>{rows}</tbody></table></div>', "logs")
+
+@app.route('/del_t/<int:tid>')
+def del_t(tid): t = Team.query.get(tid); db.session.delete(t); db.session.commit(); return redirect(url_for('setup'))
+@app.route('/del_u/<int:uid>')
+def del_u(uid): u = User.query.get(uid); db.session.delete(u); db.session.commit(); return redirect(url_for('users'))
+@app.route('/logout')
+def logout(): session.clear(); return redirect(url_for('login'))
+
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+        if not User.query.filter_by(username='admin').first():
+            db.session.add(User(username='admin', password='123')); db.session.commit()
+    app.run(host='0.0.0.0', port=5000)
