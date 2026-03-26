@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+instance/
+*.db
+*.bk*
+*.problem
+*.xlsx
+*.docx
+*.jpg
+*.png
+.env
