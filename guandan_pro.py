@@ -10,8 +10,14 @@ import os
 
 app = Flask(__name__)
 app.secret_key = "sv_guandan_v18_ultimate_international_key"
-db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'guandan_pro_v18.db')
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + db_path
+database_url = os.environ.get('DATABASE_URL')
+if database_url:
+    # Render PostgreSQL URL starts with postgres://, SQLAlchemy needs postgresql://
+    database_url = database_url.replace('postgres://', 'postgresql://', 1)
+else:
+    db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'guandan_pro_v18.db')
+    database_url = 'sqlite:///' + db_path
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
