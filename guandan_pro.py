@@ -683,10 +683,9 @@ def next_r():
 def logout():
     session.clear(); return redirect(url_for('login'))
 
-if __name__ == '__main__':
+def init_db():
     with app.app_context():
         db.create_all()
-        
         try: db.session.execute(text("ALTER TABLE match ADD COLUMN pos_p5 VARCHAR(50)")); db.session.commit()
         except Exception: db.session.rollback()
         try: db.session.execute(text("ALTER TABLE match ADD COLUMN pos_p6 VARCHAR(50)")); db.session.commit()
@@ -695,9 +694,11 @@ if __name__ == '__main__':
         except Exception: db.session.rollback()
         try: db.session.execute(text("ALTER TABLE match ADD COLUMN score_b INTEGER DEFAULT -1")); db.session.commit()
         except Exception: db.session.rollback()
-
         if not User.query.filter_by(username='admin').first():
             db.session.add(User(username='admin', password=generate_password_hash('123')))
             db.session.commit()
-            
+
+init_db()
+
+if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
