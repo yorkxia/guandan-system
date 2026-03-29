@@ -309,10 +309,31 @@ def login():
         .login-title {{ font-family: 'STKaiti', 'KaiTi', serif; letter-spacing: 3px; text-shadow: 0 2px 5px rgba(0,0,0,0.8); }}
         .btn-gold {{ background: linear-gradient(180deg, #fcd34d 0%, #f59e0b 100%); color: #451a03; border: none; transition: 0.3s; }}
         .btn-gold:hover {{ background: linear-gradient(180deg, #fde68a 0%, #d97706 100%); transform: translateY(-2px); box-shadow: 0 10px 20px rgba(245, 158, 11, 0.4); }}
+        .login-ad-wrap {{ display:none; width:100%; max-width:500px; margin:0 auto 18px; z-index:20; position:relative; }}
+        .login-ad-inner {{ display:flex; align-items:center; gap:10px; background:rgba(10,20,40,0.82); border:1.5px solid rgba(212,172,13,0.55); border-radius:30px; padding:14px 20px; min-height:54px; backdrop-filter:blur(10px); box-shadow:0 4px 24px rgba(0,0,0,0.45); cursor:default; }}
+        .login-ad-label {{ flex-shrink:0; font-size:0.68rem; font-weight:700; color:#D4AC0D; border:1px solid rgba(212,172,13,0.5); border-radius:4px; padding:1px 5px; letter-spacing:1px; }}
+        .login-ad-text-wrap {{ flex:1; overflow:hidden; }}
+        .login-ad-text {{ display:inline-block; white-space:nowrap; color:#fff; font-size:15px; font-weight:500; animation: ad-scroll-login 18s linear infinite; }}
+        .login-ad-close {{ flex-shrink:0; color:rgba(255,255,255,0.45); font-size:0.85rem; cursor:pointer; padding:2px 6px; border-radius:50%; transition:color 0.2s; }}
+        .login-ad-close:hover {{ color:#fff; }}
+        @keyframes ad-scroll-login {{
+          0%   {{ transform: translateX(60px); }}
+          100% {{ transform: translateX(-100%); }}
+        }}
     </style>
-    <div class="position-relative w-100 h-100 d-flex justify-content-center align-items-center">
+    <div class="position-relative w-100 h-100 d-flex flex-column justify-content-center align-items-center">
         <div class="suit-bg suit-1">♠</div><div class="suit-bg suit-2">♥</div>
         <div class="suit-bg suit-3">♦</div><div class="suit-bg suit-4">♣</div>
+        <!-- 广告栏 -->
+        <div class="login-ad-wrap" id="loginAdWrap">
+          <div class="login-ad-inner" id="loginAdLink">
+            <span class="login-ad-label">广 告</span>
+            <div class="login-ad-text-wrap">
+              <span class="login-ad-text" id="loginAdText"></span>
+            </div>
+            <span class="login-ad-close" onclick="closeLoginAd(event)" title="关闭">✕</span>
+          </div>
+        </div>
         <div class="login-card-pro p-5 text-center position-relative mx-3">
             <img src="/static/硅谷掼蛋协会logo.png" alt="Logo" class="logo-box position-relative" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI1MCIgZmlsbD0iI2ZiYmYyNCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBkeT0iLjNlbSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIyMCIgZmlsbD0iIzQ1MWEwMyI+TG9nbzwvdGV4dD48L3N2Zz4='">
             <h1 class="text-warning mb-1 fw-bold login-title">{T('国际掼蛋系统', 'Guandan System')}</h1>
@@ -330,6 +351,64 @@ def login():
             </form>
         </div>
     </div>
+    <script>
+    (function(){{
+      var API = 'https://silicon-guandan-system.onrender.com/scoreboard';
+      var allAds = [], normalAds = [], specialAds = [];
+      var normalIdx = 0, normalTimer = null, adClosed = false;
+
+      fetch(API + '/api/ads').then(function(r){{ return r.json(); }}).then(function(data){{
+        allAds = data.ads || (data.ad ? [data.ad] : []);
+        normalAds = allAds.filter(function(a){{ return !a.frequency_minutes; }});
+        specialAds = allAds.filter(function(a){{ return !!a.frequency_minutes; }});
+        if (allAds.length === 0) return;
+        if (normalAds.length > 0) {{
+          showNormal(0);
+          if (normalAds.length > 1) normalTimer = setTimeout(rotateNormal, 30000);
+        }} else {{ displayAd(specialAds[0]); }}
+        specialAds.forEach(function(ad){{
+          setInterval(function(){{
+            if (adClosed) return;
+            if (normalTimer){{ clearTimeout(normalTimer); normalTimer = null; }}
+            displayAd(ad);
+            if (normalAds.length > 0) normalTimer = setTimeout(rotateNormal, 30000);
+          }}, ad.frequency_minutes * 60 * 1000);
+        }});
+      }}).catch(function(){{}});
+
+      function showNormal(idx){{ normalIdx = idx % normalAds.length; displayAd(normalAds[normalIdx]); }}
+      function rotateNormal(){{
+        if (adClosed) return;
+        normalIdx = (normalIdx + 1) % normalAds.length;
+        displayAd(normalAds[normalIdx]);
+        normalTimer = setTimeout(rotateNormal, 30000);
+      }}
+      function displayAd(ad){{
+        var el = document.getElementById('loginAdText');
+        el.textContent = ad.content_text || ad.title;
+        el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+        var link = document.getElementById('loginAdLink');
+        link.onclick = null;
+        if (ad.link_url){{
+          link.style.cursor = 'pointer';
+          link.onclick = function(e){{
+            if (e.target.classList.contains('login-ad-close')) return;
+            fetch(API + '/api/ads/' + ad.id + '/click', {{method:'POST'}}).catch(function(){{}});
+            window.open(ad.link_url, '_blank', 'noopener');
+          }};
+        }} else {{ link.style.cursor = 'default'; }}
+        document.getElementById('loginAdWrap').style.display = 'block';
+        adClosed = false;
+        fetch(API + '/api/ads/' + ad.id + '/impression', {{method:'POST'}}).catch(function(){{}});
+      }}
+      window.closeLoginAd = function(e){{
+        e.stopPropagation();
+        document.getElementById('loginAdWrap').style.display = 'none';
+        adClosed = true;
+        if (normalTimer){{ clearTimeout(normalTimer); normalTimer = null; }}
+      }};
+    }})();
+    </script>
     """
     return render_layout(login_html, is_login=True)
 
