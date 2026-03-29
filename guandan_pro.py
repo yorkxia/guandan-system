@@ -339,7 +339,7 @@ def login():
         <div style="padding-top:60px; width:100%; display:flex; justify-content:center;">
         <div class="login-card-pro p-5 text-center position-relative mx-3">
             <img src="/static/硅谷掼蛋协会logo.png" alt="Logo" class="logo-box position-relative" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI1MCIgZmlsbD0iI2ZiYmYyNCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBkeT0iLjNlbSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIyMCIgZmlsbD0iIzQ1MWEwMyI+TG9nbzwvdGV4dD48L3N2Zz4='">
-            <h1 class="text-warning mb-0 fw-bold login-title">{T('硅谷掼蛋管理系统', 'SV Guandan System')}</h1>
+            <h1 class="text-warning mb-0 fw-bold login-title">硅谷掼蛋管理系统</h1>
             <p class="login-subtitle-en">Silicon Valley Guandan · Management System</p>
             <p class="text-white-50 mb-0 small" style="letter-spacing: 1px; font-size:0.7rem;">Tournament Management V18.0</p>
             <div class="login-divider"></div>
