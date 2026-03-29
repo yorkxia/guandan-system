@@ -309,19 +309,19 @@ def login():
         .login-title {{ font-family: 'STKaiti', 'KaiTi', serif; letter-spacing: 3px; text-shadow: 0 2px 5px rgba(0,0,0,0.8); }}
         .btn-gold {{ background: linear-gradient(180deg, #fcd34d 0%, #f59e0b 100%); color: #451a03; border: none; transition: 0.3s; }}
         .btn-gold:hover {{ background: linear-gradient(180deg, #fde68a 0%, #d97706 100%); transform: translateY(-2px); box-shadow: 0 10px 20px rgba(245, 158, 11, 0.4); }}
-        .login-ad-wrap {{ display:none; width:100%; max-width:500px; margin:0 auto 18px; z-index:20; position:relative; }}
-        .login-ad-inner {{ display:flex; align-items:center; gap:10px; background:rgba(10,20,40,0.82); border:1.5px solid rgba(212,172,13,0.55); border-radius:30px; padding:14px 20px; min-height:54px; backdrop-filter:blur(10px); box-shadow:0 4px 24px rgba(0,0,0,0.45); cursor:default; }}
-        .login-ad-label {{ flex-shrink:0; font-size:0.68rem; font-weight:700; color:#D4AC0D; border:1px solid rgba(212,172,13,0.5); border-radius:4px; padding:1px 5px; letter-spacing:1px; }}
+        .login-ad-wrap {{ display:none; width:92vw; max-width:1100px; margin:0 auto 22px; z-index:20; position:relative; }}
+        .login-ad-inner {{ display:flex; align-items:center; gap:14px; background:rgba(10,20,40,0.88); border:2px solid rgba(212,172,13,0.6); border-radius:40px; padding:26px 36px; min-height:108px; backdrop-filter:blur(12px); box-shadow:0 6px 32px rgba(0,0,0,0.55); cursor:default; }}
+        .login-ad-label {{ flex-shrink:0; font-size:0.82rem; font-weight:700; color:#D4AC0D; border:1.5px solid rgba(212,172,13,0.6); border-radius:5px; padding:3px 8px; letter-spacing:2px; }}
         .login-ad-text-wrap {{ flex:1; overflow:hidden; }}
-        .login-ad-text {{ display:inline-block; white-space:nowrap; color:#fff; font-size:15px; font-weight:500; animation: ad-scroll-login 18s linear infinite; }}
-        .login-ad-close {{ flex-shrink:0; color:rgba(255,255,255,0.45); font-size:0.85rem; cursor:pointer; padding:2px 6px; border-radius:50%; transition:color 0.2s; }}
+        .login-ad-text {{ display:inline-block; white-space:nowrap; color:#fff; font-size:22px; font-weight:500; animation: ad-scroll-login 20s linear infinite; }}
+        .login-ad-close {{ flex-shrink:0; color:rgba(255,255,255,0.45); font-size:1.1rem; cursor:pointer; padding:4px 8px; border-radius:50%; transition:color 0.2s; }}
         .login-ad-close:hover {{ color:#fff; }}
         @keyframes ad-scroll-login {{
-          0%   {{ transform: translateX(60px); }}
+          0%   {{ transform: translateX(80px); }}
           100% {{ transform: translateX(-100%); }}
         }}
     </style>
-    <div class="position-relative w-100 h-100 d-flex flex-column justify-content-center align-items-center">
+    <div class="position-relative w-100 h-100 d-flex flex-column justify-content-start align-items-center" style="padding-top:6vh">
         <div class="suit-bg suit-1">♠</div><div class="suit-bg suit-2">♥</div>
         <div class="suit-bg suit-3">♦</div><div class="suit-bg suit-4">♣</div>
         <!-- 广告栏 -->
@@ -334,6 +334,7 @@ def login():
             <span class="login-ad-close" onclick="closeLoginAd(event)" title="关闭">✕</span>
           </div>
         </div>
+        <div style="padding-top:60px; width:100%; display:flex; justify-content:center;">
         <div class="login-card-pro p-5 text-center position-relative mx-3">
             <img src="/static/硅谷掼蛋协会logo.png" alt="Logo" class="logo-box position-relative" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI1MCIgZmlsbD0iI2ZiYmYyNCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBkeT0iLjNlbSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIyMCIgZmlsbD0iIzQ1MWEwMyI+TG9nbzwvdGV4dD48L3N2Zz4='">
             <h1 class="text-warning mb-1 fw-bold login-title">{T('硅谷掼蛋管理系统', 'SV Guandan System')}</h1>
@@ -349,6 +350,7 @@ def login():
                 </div>
                 <button class="btn btn-gold w-100 py-3 fw-bold shadow fs-5 rounded-pill">♠ {T('进入赛场', 'Enter')} ♠</button>
             </form>
+        </div>
         </div>
     </div>
     <script>
