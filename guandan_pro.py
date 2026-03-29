@@ -304,11 +304,13 @@ def login():
         .suit-2 {{ bottom: -10%; right: 5%; transform: rotate(15deg); color: rgba(239, 68, 68, 0.04); }}
         .suit-3 {{ top: 40%; left: -5%; transform: rotate(10deg); color: rgba(239, 68, 68, 0.04); }}
         .suit-4 {{ top: 15%; right: 15%; transform: rotate(-25deg); }}
-        .login-card-pro {{ background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(20px); border: 1px solid rgba(251, 191, 36, 0.4); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.9); z-index: 10; width: 100%; max-width: 440px; border-radius: 20px; }}
-        .logo-box {{ width: 120px; height: 120px; border-radius: 50%; border: 3px solid #fbbf24; box-shadow: 0 0 30px rgba(251, 191, 36, 0.5); object-fit: cover; margin-top: -60px; margin-bottom: 20px; background: #fff; padding: 2px; }}
-        .login-title {{ font-family: 'STKaiti', 'KaiTi', serif; letter-spacing: 3px; text-shadow: 0 2px 5px rgba(0,0,0,0.8); }}
-        .btn-gold {{ background: linear-gradient(180deg, #fcd34d 0%, #f59e0b 100%); color: #451a03; border: none; transition: 0.3s; }}
-        .btn-gold:hover {{ background: linear-gradient(180deg, #fde68a 0%, #d97706 100%); transform: translateY(-2px); box-shadow: 0 10px 20px rgba(245, 158, 11, 0.4); }}
+        .login-card-pro {{ background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(24px); border: 1px solid rgba(251, 191, 36, 0.45); box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255,255,255,0.06); z-index: 10; width: 100%; max-width: 500px; border-radius: 24px; }}
+        .logo-box {{ width: 130px; height: 130px; border-radius: 50%; border: 3px solid #fbbf24; box-shadow: 0 0 36px rgba(251, 191, 36, 0.55); object-fit: cover; margin-top: -65px; margin-bottom: 16px; background: #fff; padding: 2px; }}
+        .login-title {{ font-family: 'STKaiti', 'KaiTi', serif; font-size: 1.85rem; letter-spacing: 4px; white-space: nowrap; text-shadow: 0 2px 8px rgba(0,0,0,0.9); }}
+        .login-subtitle-en {{ font-size: 0.72rem; letter-spacing: 3px; color: rgba(251,191,36,0.55); text-transform: uppercase; margin-top: 2px; margin-bottom: 6px; }}
+        .login-divider {{ width: 60px; height: 2px; background: linear-gradient(90deg, transparent, rgba(212,172,13,0.7), transparent); margin: 12px auto 24px; border-radius: 2px; }}
+        .btn-gold {{ background: linear-gradient(180deg, #fcd34d 0%, #f59e0b 100%); color: #451a03; border: none; transition: 0.3s; letter-spacing: 2px; }}
+        .btn-gold:hover {{ background: linear-gradient(180deg, #fde68a 0%, #d97706 100%); transform: translateY(-2px); box-shadow: 0 10px 25px rgba(245, 158, 11, 0.5); }}
         .login-ad-wrap {{ display:none; width:92vw; max-width:1100px; margin:0 auto 22px; z-index:20; position:relative; }}
         .login-ad-inner {{ display:flex; align-items:center; gap:14px; background:rgba(10,20,40,0.88); border:2px solid rgba(212,172,13,0.6); border-radius:40px; padding:26px 36px; min-height:108px; backdrop-filter:blur(12px); box-shadow:0 6px 32px rgba(0,0,0,0.55); cursor:default; }}
         .login-ad-label {{ flex-shrink:0; font-size:0.82rem; font-weight:700; color:#D4AC0D; border:1.5px solid rgba(212,172,13,0.6); border-radius:5px; padding:3px 8px; letter-spacing:2px; }}
@@ -337,14 +339,16 @@ def login():
         <div style="padding-top:60px; width:100%; display:flex; justify-content:center;">
         <div class="login-card-pro p-5 text-center position-relative mx-3">
             <img src="/static/硅谷掼蛋协会logo.png" alt="Logo" class="logo-box position-relative" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI1MCIgZmlsbD0iI2ZiYmYyNCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBkeT0iLjNlbSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIyMCIgZmlsbD0iIzQ1MWEwMyI+TG9nbzwvdGV4dD48L3N2Zz4='">
-            <h1 class="text-warning mb-1 fw-bold login-title">{T('硅谷掼蛋管理系统', 'SV Guandan System')}</h1>
-            <p class="text-white-50 mb-5 small" style="letter-spacing: 1px;">Tournament Management V18.0</p>
+            <h1 class="text-warning mb-0 fw-bold login-title">{T('硅谷掼蛋管理系统', 'SV Guandan System')}</h1>
+            <p class="login-subtitle-en">Silicon Valley Guandan · Management System</p>
+            <p class="text-white-50 mb-0 small" style="letter-spacing: 1px; font-size:0.7rem;">Tournament Management V18.0</p>
+            <div class="login-divider"></div>
             <form method="post">
                 <div class="form-floating mb-3 text-dark">
                     <input name="u" class="form-control fw-bold border-0 bg-light" id="u" placeholder="Account" required>
                     <label for="u">🪪 {T('管理账号', 'Account')}</label>
                 </div>
-                <div class="form-floating mb-5 text-dark">
+                <div class="form-floating mb-4 text-dark">
                     <input type="password" name="p" class="form-control fw-bold border-0 bg-light" id="p" placeholder="Password" required>
                     <label for="p">🔑 {T('管理密码', 'Password')}</label>
                 </div>
