@@ -10,6 +10,7 @@ import os
 
 app = Flask(__name__)
 app.secret_key = "sv_guandan_v18_ultimate_international_key"
+MONITOR_API_URL = os.environ.get('MONITOR_API_URL', '')
 database_url = os.environ.get('DATABASE_URL')
 if database_url:
     # Render PostgreSQL URL starts with postgres://, SQLAlchemy needs postgresql://
@@ -252,6 +253,7 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
     <body style="{body_style}">
         {f'<div class="w-100 align-self-start"><nav class="navbar navbar-expand-lg navbar-dark mb-4"><div class="container-fluid px-5"><a class="navbar-brand fw-bold text-info fs-4" href="/">🏆 Guandan System</a><button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"><span class="navbar-toggler-icon"></span></button><div class="collapse navbar-collapse" id="navbarNav"><ul class="navbar-nav mx-auto">{nav_html}</ul><div class="d-flex align-items-center"><span class="badge bg-primary fs-6 px-3 py-2 me-3">{T("当前轮次: 第", "Current Round:")} {conf.current_round if conf else 0}</span><a href="/panorama" target="_blank" class="btn btn-outline-warning btn-sm rounded-pill me-2">📺 {T("大屏", "Display")}</a><a href="/lock_screen" class="btn btn-outline-light btn-sm rounded-pill me-2">❄️ {T("锁定", "Freeze")}</a><a href="/logout" class="btn btn-outline-danger btn-sm rounded-pill">退出 / Exit</a></div></div></div></nav></div>' if not is_login and not hide_nav else ''}
         <div class="{'w-100' if is_login else 'container-fluid px-5 py-2'}">{content}</div>
+    {'<script>(function(){{var _m="{monitor_url}";if(!_m)return;try{{fetch(_m+"/api/visit",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{page:"{page_name}"}})}}). catch(function(){{}});}}catch(e){{}}}})()</script>'.format(monitor_url=MONITOR_API_URL, page_name=('gs-' + active) if active else ('gs-login' if is_login else 'gs-home')) if MONITOR_API_URL else ''}
     </body></html>
     """)
 
@@ -547,12 +549,69 @@ def panorama():
     if not t: return "No active tournament"
     conf = get_config(t.id)
     cards_html, _ = generate_matches_html(t, conf, is_panorama=True)
-    
+
     marquee = f'<div class="ad-ticker-pro w-100"><div class="ad-content">📢 {conf.scroll_ad} 📢</div></div>'
-    
-    html = f'{marquee}<div class="container-fluid px-5 mt-4"><div id="timer-box" style="transform: scale(1.2); margin-top:20px; margin-bottom: 50px;"><div id="time-display" style="margin:0 30px;">--:--</div></div><div class="row">{cards_html}</div></div><script>window.onload = function() {{ initPanoramaDisplay(); startTimer(); }};</script>'
-    
+
+    # Build grouping list sorted by table_no
+    ms_sorted = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).order_by(Match.table_no).all()
+    team_map = {team.id: team for team in Team.query.filter_by(tournament_id=t.id).all()}
+    grouping_rows = ""
+    for m in ms_sorted:
+        ta = team_map.get(m.team_a_id)
+        tb = team_map.get(m.team_b_id)
+        ta_players = ta.players if ta else m.team_a_name
+        tb_players = tb.players if tb else m.team_b_name
+        grouping_rows += (
+            f'<div style="padding:10px 0; border-bottom:1px solid rgba(255,215,0,0.2);">'
+            f'<span style="color:#FFD700; font-weight:900; font-size:1.25rem; margin-right:12px;">（{m.table_no}）号桌</span>'
+            f'<span style="color:#7EC8E3; font-weight:700;">{m.team_a_name}</span>'
+            f'<span style="color:rgba(255,255,255,0.75); font-size:1rem;">（{ta_players}）</span>'
+            f'<span style="color:rgba(255,255,255,0.5); margin:0 10px;">vs</span>'
+            f'<span style="color:#F9A8D4; font-weight:700;">{m.team_b_name}</span>'
+            f'<span style="color:rgba(255,255,255,0.75); font-size:1rem;">（{tb_players}）</span>'
+            f'</div>'
+        )
+    grouping_box = (
+        f'<div class="container-fluid px-5 mt-5 mb-5">'
+        f'<div style="background:rgba(255,215,0,0.08); border:2px solid #FFD700; border-radius:16px; padding:30px 40px; box-shadow:0 0 30px rgba(255,215,0,0.15);">'
+        f'<div style="color:#FFD700; font-size:1.5rem; font-weight:900; letter-spacing:2px; margin-bottom:18px;">📋 第{conf.current_round}轮 参赛分组</div>'
+        f'<div style="font-size:1.15rem; line-height:1.8;">{grouping_rows}</div>'
+        f'<div style="margin-top:28px; text-align:center;">'
+        f'<a href="/export_grouping" style="display:inline-block; background:linear-gradient(135deg,#F59E0B,#D97706); color:#fff; font-size:1.1rem; font-weight:800; padding:14px 48px; border-radius:50px; text-decoration:none; letter-spacing:1px; box-shadow:0 4px 20px rgba(245,158,11,0.4);">📥 导出参赛分组信息</a>'
+        f'</div>'
+        f'</div>'
+        f'</div>'
+    )
+
+    html = f'{marquee}<div class="container-fluid px-5 mt-4"><div id="timer-box" style="transform: scale(1.2); margin-top:20px; margin-bottom: 50px;"><div id="time-display" style="margin:0 30px;">--:--</div></div><div class="row">{cards_html}</div></div>{grouping_box}<script>window.onload = function() {{ initPanoramaDisplay(); startTimer(); }};</script>'
+
     return render_layout(html, active="panorama", hide_nav=True)
+
+@app.route('/export_grouping')
+def export_grouping():
+    t = get_active_t()
+    if not t: return "No active tournament"
+    conf = get_config(t.id)
+    ms_sorted = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).order_by(Match.table_no).all()
+    team_map = {team.id: team for team in Team.query.filter_by(tournament_id=t.id).all()}
+    export_data = []
+    for m in ms_sorted:
+        ta = team_map.get(m.team_a_id)
+        tb = team_map.get(m.team_b_id)
+        export_data.append({
+            "桌号": m.table_no,
+            "队伍A": m.team_a_name,
+            "队伍A选手": ta.players if ta else "",
+            "队伍B": m.team_b_name,
+            "队伍B选手": tb.players if tb else "",
+        })
+    df = pd.DataFrame(export_data)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name=f"第{conf.current_round}轮分组")
+    output.seek(0)
+    log_act("Export Grouping", f"Round {conf.current_round} grouping exported.", t.id)
+    return send_file(output, as_attachment=True, download_name=f"分组信息_第{conf.current_round}轮_{t.name}.xlsx")
 
 @app.route('/save/<int:mid>', methods=['POST'])
 def save(mid):
