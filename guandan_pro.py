@@ -69,6 +69,9 @@ class Team(db.Model):
     current_score = db.Column(db.Integer, default=0)
     round_score = db.Column(db.Integer, default=0)
     history_opponents = db.Column(db.Text, default="")
+    seat_ns_count = db.Column(db.Integer, default=0)   # 北/南方向（或6人赛①③⑤位）出场次数
+    seat_ew_count = db.Column(db.Integer, default=0)   # 东/西方向（或6人赛②④⑥位）出场次数
+    had_bye = db.Column(db.Boolean, default=False)     # 是否已获得过拜轮
 
 class Match(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -128,29 +131,93 @@ def log_act(action, details="", t_id=None):
     except:
         db.session.rollback()
 
+def _backtrack_pair(teams, round_no, total_r, used, pairs, idx):
+    """回溯配对核心：确保所有队伍都能完成配对，无死锁"""
+    # 跳过已配对队伍
+    while idx < len(teams) and teams[idx].id in used:
+        idx += 1
+    if idx >= len(teams):
+        return list(pairs) if len(used) == len(teams) else None
+    current = teams[idx]
+    candidates = [t for t in teams[idx+1:] if t.id not in used]
+    # 两轮尝试：第一轮避免重复对阵；第二轮（最后轮或被迫时）允许重复
+    allow_rematch_rounds = [False, True] if round_no < total_r else [True]
+    for allow_rematch in allow_rematch_rounds:
+        for opp in candidates:
+            history = current.history_opponents.split(',') if current.history_opponents else []
+            if str(opp.id) in history and not allow_rematch:
+                continue
+            used.add(current.id); used.add(opp.id)
+            pairs.append((current, opp))
+            result = _backtrack_pair(teams, round_no, total_r, used, pairs, idx + 1)
+            if result is not None:
+                return result
+            used.discard(current.id); used.discard(opp.id)
+            pairs.pop()
+    return None
+
+def assign_seats(t1, t2, p1, p2, is_6p):
+    """
+    座位方向平衡分配（国际标准：每队各方向出场次数尽量均等）
+    t1 NS次数 <= EW次数 → 本轮给 t1 分配 NS；否则给 EW。
+    """
+    t1_wants_ns = (t1.seat_ns_count <= t1.seat_ew_count)
+    if is_6p:
+        if t1_wants_ns:
+            # t1 → ①③⑤位（north/east/p6），t2 → ②④⑥位（p5/south/west）
+            seats = dict(pos_north=p1[0], pos_east=p1[1], pos_p6=p1[2],
+                         pos_p5=p2[0], pos_south=p2[1], pos_west=p2[2])
+            t1.seat_ns_count += 1; t2.seat_ew_count += 1
+        else:
+            seats = dict(pos_north=p2[0], pos_east=p2[1], pos_p6=p2[2],
+                         pos_p5=p1[0], pos_south=p1[1], pos_west=p1[2])
+            t1.seat_ew_count += 1; t2.seat_ns_count += 1
+    else:
+        if t1_wants_ns:
+            # t1 → 北/南，t2 → 东/西
+            seats = dict(pos_north=p1[0] if len(p1)>0 else 'P1',
+                         pos_south=p1[1] if len(p1)>1 else 'P3',
+                         pos_east=p2[0] if len(p2)>0 else 'P2',
+                         pos_west=p2[1] if len(p2)>1 else 'P4',
+                         pos_p5='', pos_p6='')
+            t1.seat_ns_count += 1; t2.seat_ew_count += 1
+        else:
+            seats = dict(pos_north=p2[0] if len(p2)>0 else 'P1',
+                         pos_south=p2[1] if len(p2)>1 else 'P3',
+                         pos_east=p1[0] if len(p1)>0 else 'P2',
+                         pos_west=p1[1] if len(p1)>1 else 'P4',
+                         pos_p5='', pos_p6='')
+            t1.seat_ew_count += 1; t2.seat_ns_count += 1
+    return seats
+
 def swiss_pairing(t_id, round_no):
+    """
+    改进版瑞士制配对算法 V2（符合国际标准）
+    改进点：
+      1. 回溯算法 — 保证配对完整，无死锁
+      2. 拜轮处理 — 奇数队时积分最低且未曾拜轮的队获得拜轮（自动 3 胜分）
+      3. 座位方向平衡 — 见 assign_seats()
+    返回 (pairs, bye_team)，bye_team 为 None 或获得拜轮的队
+    """
     teams = Team.query.filter_by(tournament_id=t_id).all()
     teams.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
-    paired, used = [], set()
     total_r = get_config(t_id).total_rounds
-    for i in range(len(teams)):
-        if teams[i].id in used: continue
-        found = False
-        for j in range(i + 1, len(teams)):
-            if teams[j].id in used: continue
-            history = teams[i].history_opponents.split(',') if teams[i].history_opponents else []
-            if str(teams[j].id) not in history or round_no >= total_r:
-                paired.append((teams[i], teams[j]))
-                used.update([teams[i].id, teams[j].id])
-                found = True
-                break
-        if not found and i < len(teams) - 1:
-            for k in range(i + 1, len(teams)):
-                if teams[k].id not in used:
-                    paired.append((teams[i], teams[k]))
-                    used.update([teams[i].id, teams[k].id])
-                    break
-    return paired
+    bye_team = None
+    working = list(teams)
+    # 拜轮处理：奇数队时，从积分最低队开始找未曾拜轮者
+    if len(working) % 2 == 1:
+        for team in reversed(working):
+            if not team.had_bye:
+                bye_team = team; break
+        if bye_team is None:
+            bye_team = working[-1]  # 所有队都曾拜轮，给积分最低者再次拜轮
+        working = [t for t in working if t.id != bye_team.id]
+    # 回溯配对
+    result = _backtrack_pair(working, round_no, total_r, set(), [], 0)
+    if result is None:
+        # 极端兜底：顺序强制配对
+        result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
+    return result, bye_team
 
 # --- 3. UI 渲染引擎 ---
 
@@ -497,18 +564,29 @@ def init_game():
     Match.query.filter_by(tournament_id=t.id).delete()
     ts = Team.query.filter_by(tournament_id=t.id).all()
     if len(ts) < 2: return "Not enough teams"
+    # 重置座位计数与拜轮记录（新赛事从零开始）
+    for team in ts:
+        team.seat_ns_count = 0; team.seat_ew_count = 0; team.had_bye = False
     random.shuffle(ts)
-    for i in range(0, len(ts)-1, 2):
-        t1, t2 = ts[i], ts[i+1]
-        p1, p2 = [x.strip() for x in t1.players.replace('，',',').split(',')], [x.strip() for x in t2.players.replace('，',',').split(',')]
-        # 6人赛：每队恰好3名队员；4人赛：每队恰好2名队员
-        if len(p1) >= 3 and len(p2) >= 3:
-            # 6人赛桌：A队占①③⑤位，B队占②④⑥位（对面而坐）
-            db.session.add(Match(tournament_id=t.id, round_no=1, table_no=(i//2+1), team_a_id=t1.id, team_b_id=t2.id, team_a_name=t1.name, team_b_name=t2.name, pos_north=p1[0].strip(), pos_p5=p2[0].strip(), pos_east=p1[1].strip(), pos_south=p2[1].strip(), pos_p6=p1[2].strip(), pos_west=p2[2].strip()))
-        else:
-            # 4人赛桌：A队占北/南位置，B队占东/西位置
-            db.session.add(Match(tournament_id=t.id, round_no=1, table_no=(i//2+1), team_a_id=t1.id, team_b_id=t2.id, team_a_name=t1.name, team_b_name=t2.name, pos_north=p1[0].strip() if len(p1)>0 else "P1", pos_east=p2[0].strip() if len(p2)>0 else "P2", pos_south=p1[1].strip() if len(p1)>1 else "P3", pos_west=p2[1].strip() if len(p2)>1 else "P4", pos_p5="", pos_p6=""))
-    log_act("Init Game", "Generated Round 1", t.id); db.session.commit()
+    # 拜轮处理（首轮奇数队）
+    bye_team = None
+    working = list(ts)
+    if len(working) % 2 == 1:
+        bye_team = working[-1]
+        working = working[:-1]
+        bye_team.had_bye = True
+        bye_team.current_score += 3
+        log_act("Bye Round", f"Round 1 bye: {bye_team.name} (+3 win pts)", t.id)
+    for i in range(0, len(working)-1, 2):
+        t1, t2 = working[i], working[i+1]
+        p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
+        p2 = [x.strip() for x in t2.players.replace('，',',').split(',')]
+        is_6p = len(p1) >= 3 and len(p2) >= 3
+        seats = assign_seats(t1, t2, p1, p2, is_6p)
+        db.session.add(Match(tournament_id=t.id, round_no=1, table_no=(i//2+1),
+                             team_a_id=t1.id, team_b_id=t2.id,
+                             team_a_name=t1.name, team_b_name=t2.name, **seats))
+    log_act("Init Game", "Generated Round 1 (Swiss V2)", t.id); db.session.commit()
     return redirect(url_for('matches'))
 
 # --- 核心页面：共用生成比赛卡片代码 ---
@@ -817,16 +895,21 @@ def edit_team_data(tid):
 def next_r():
     t = get_active_t()
     conf = get_config(t.id); conf.current_round += 1
-    for i, (t1, t2) in enumerate(swiss_pairing(t.id, conf.current_round)):
-        p1, p2 = [x.strip() for x in t1.players.replace('，',',').split(',')], [x.strip() for x in t2.players.replace('，',',').split(',')]
-        # 6人赛：每队恰好3名队员；4人赛：每队恰好2名队员
-        if len(p1) >= 3 and len(p2) >= 3:
-            # 6人赛桌：A队占①③⑤位，B队占②④⑥位（对面而坐）
-            db.session.add(Match(tournament_id=t.id, round_no=conf.current_round, table_no=i+1, team_a_id=t1.id, team_b_id=t2.id, team_a_name=t1.name, team_b_name=t2.name, pos_north=p1[0].strip(), pos_p5=p2[0].strip(), pos_east=p1[1].strip(), pos_south=p2[1].strip(), pos_p6=p1[2].strip(), pos_west=p2[2].strip()))
-        else:
-            # 4人赛桌：A队占北/南位置，B队占东/西位置
-            db.session.add(Match(tournament_id=t.id, round_no=conf.current_round, table_no=i+1, team_a_id=t1.id, team_b_id=t2.id, team_a_name=t1.name, team_b_name=t2.name, pos_north=p1[0].strip() if len(p1)>0 else "P1", pos_east=p2[0].strip() if len(p2)>0 else "P2", pos_south=p1[1].strip() if len(p1)>1 else "P3", pos_west=p2[1].strip() if len(p2)>1 else "P4", pos_p5="", pos_p6=""))
-    log_act("Next Round", f"Round {conf.current_round}", t.id); db.session.commit()
+    pairs, bye_team = swiss_pairing(t.id, conf.current_round)
+    # 拜轮队自动获得 3 胜分
+    if bye_team:
+        bye_team.had_bye = True
+        bye_team.current_score += 3
+        log_act("Bye Round", f"Round {conf.current_round} bye: {bye_team.name} (+3 win pts)", t.id)
+    for i, (t1, t2) in enumerate(pairs):
+        p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
+        p2 = [x.strip() for x in t2.players.replace('，',',').split(',')]
+        is_6p = len(p1) >= 3 and len(p2) >= 3
+        seats = assign_seats(t1, t2, p1, p2, is_6p)
+        db.session.add(Match(tournament_id=t.id, round_no=conf.current_round, table_no=i+1,
+                             team_a_id=t1.id, team_b_id=t2.id,
+                             team_a_name=t1.name, team_b_name=t2.name, **seats))
+    log_act("Next Round", f"Round {conf.current_round} (Swiss V2)", t.id); db.session.commit()
     return redirect(url_for('matches'))
 
 @app.route('/logout')
@@ -843,6 +926,12 @@ def init_db():
         try: db.session.execute(text("ALTER TABLE match ADD COLUMN score_a INTEGER DEFAULT -1")); db.session.commit()
         except Exception: db.session.rollback()
         try: db.session.execute(text("ALTER TABLE match ADD COLUMN score_b INTEGER DEFAULT -1")); db.session.commit()
+        except Exception: db.session.rollback()
+        try: db.session.execute(text("ALTER TABLE team ADD COLUMN seat_ns_count INTEGER DEFAULT 0")); db.session.commit()
+        except Exception: db.session.rollback()
+        try: db.session.execute(text("ALTER TABLE team ADD COLUMN seat_ew_count INTEGER DEFAULT 0")); db.session.commit()
+        except Exception: db.session.rollback()
+        try: db.session.execute(text("ALTER TABLE team ADD COLUMN had_bye BOOLEAN DEFAULT FALSE")); db.session.commit()
         except Exception: db.session.rollback()
         if not User.query.filter_by(username='admin').first():
             db.session.add(User(username='admin', password=generate_password_hash('123')))
