@@ -662,13 +662,15 @@ def create_new_tournament():
 def init_game():
     t = get_active_t()
     if not t: return redirect(url_for('setup'))
-    conf = get_config(t.id); conf.current_round = 1
+    conf = get_config(t.id)
+    conf.current_round = 1; conf.mode = 0; conf.stage = None; conf.num_groups = 0; conf.advance_per_group = 0
     Match.query.filter_by(tournament_id=t.id).delete()
     ts = Team.query.filter_by(tournament_id=t.id).all()
     if len(ts) < 2: return "Not enough teams"
     # 重置座位计数与拜轮记录（新赛事从零开始）
     for team in ts:
         team.seat_ns_count = 0; team.seat_ew_count = 0; team.had_bye = False
+        team.group_id = 0; team.is_finalist = False
     random.shuffle(ts)
     # 拜轮处理（首轮奇数队）
     bye_team = None
