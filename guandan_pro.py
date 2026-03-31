@@ -573,54 +573,96 @@ def setup():
     
     rows = "".join([f"<tr><td class='fw-bold text-info'>{tm.name}</td><td>{tm.players}</td><td><button class='btn btn-sm btn-outline-info me-2' data-bs-toggle='modal' data-bs-target='#edit{tm.id}'>{T('编辑','Edit')}</button><a href='/del_team/{tm.id}' class='btn btn-sm btn-outline-danger'>{T('删除','Delete')}</a></td></tr><div class='modal fade' id='edit{tm.id}'><div class='modal-dialog modal-dialog-centered'><div class='modal-content bg-dark text-white border-info'><form action='/edit_team/{tm.id}' method='post'><div class='modal-body p-4'><h5 class='mb-4 text-info fw-bold'>{T('修改参赛信息','Edit Info')}</h5><div class='mb-3'><label>{T('名称','Name')}</label><input name='name' class='form-control bg-secondary text-white border-0' value='{tm.name}'></div><div class='mb-3'><label>{T('选手','Players')}</label><input name='players' class='form-control bg-secondary text-white border-0' value='{tm.players}'></div></div><div class='modal-footer border-0'><button type='submit' class='btn btn-info w-100 fw-bold'>{T('保存修改','Save Changes')}</button></div></form></div></div></div>" for tm in teams])
     
-    return render_layout(f"""<div class="row"><div class="col-md-4">{excel_upload_html}{team_input_html}<div class="glass-card p-4 shadow"><h5>📅 {T('赛事存档','Tournament Archives')}</h5><div class="list-group mt-3 small mb-4">{"".join([f"<a href='/view_history/{h.id}' class='list-group-item list-group-item-action bg-transparent text-white border-secondary'>{'<span class=\"badge bg-info\">Active</span>' if h.is_active else '📁'} {h.name} ({h.owner})</a>" for h in history])}</div><div class="border-top border-secondary pt-3"><h6 class="text-info small fw-bold mb-3">🆕 {T('启动新赛事','Create New Tournament')}</h6><form action="/create_new_tournament" method="post"><div class="input-group input-group-sm"><input name="new_name" class="form-control bg-dark text-white border-secondary" placeholder="Name" required><button class="btn btn-outline-info" type="submit">{T('创建','Create')}</button></div></form></div></div></div><div class="col-md-8 px-4"><div class="glass-card p-4 shadow"><div class="d-flex justify-content-between mb-4"><h5>{T('参赛名单','Participant List')} ({len(teams)})</h5><a href="/export_excel" class="btn btn-outline-info btn-sm rounded-pill px-3 {'disabled' if not t else ''}">📥 {T('导出全记录 (Excel)','Export Full Record')}</a></div><div class="table-responsive" style="max-height: 500px;"><table class="table table-dark table-hover"><thead><tr><th>{T('队伍名称','Team')}</th><th>{T('选手成员','Players')}</th><th>{T('管理','Manage')}</th></tr></thead><tbody>{rows}</tbody></table></div><button type="button" class="btn btn-info w-100 py-3 fw-bold mt-4 fs-5 shadow-lg {'disabled' if not t else ''}" {'disabled' if not t else ''} data-bs-toggle="modal" data-bs-target="#initModal">🎲 {T('锁定并生成首轮对阵','Lock & Generate Round 1')}</button>
-<!-- 首轮模式选择模态框 -->
-<div class="modal fade" id="initModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"><div class="modal-content bg-dark text-white border-info shadow-lg">
-  <div class="modal-header border-info"><h5 class="modal-title text-info fw-bold">🎲 {T('选择赛制','Select Format')}</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
-  <div class="modal-body p-4">
-    <div class="row g-3 mb-4">
-      <div class="col-12"><a href="/init_game" class="btn btn-outline-info w-100 py-3 fw-bold fs-5">🔄 {T('不分组 · 直接随机循环赛','No Groups · Random Round-Robin')}</a><small class="text-white-50 d-block mt-1 text-center">{T('所有队伍直接进入瑞士制循环赛（原有功能不变）','All teams enter Swiss round-robin directly')}</small></div>
-    </div>
-    <hr class="border-secondary">
-    <div class="mt-3"><h6 class="text-warning fw-bold mb-3">🏆 {T('分小组赛','Group Stage')}</h6>
-    <form action="/init_game_group" method="post" id="groupForm">
-      <div class="row g-3 mb-3">
-        <div class="col-md-6">
-          <label class="small text-white-50 mb-1">{T('分几组？','Number of Groups')}</label>
-          <input type="number" name="num_groups" id="num_groups" class="form-control bg-secondary text-white border-0" min="2" max="8" value="2" required oninput="validateGroups()">
-        </div>
-        <div class="col-md-6">
-          <label class="small text-white-50 mb-1">{T('每组出线名额','Advance per Group')}</label>
-          <input type="number" name="advance_per_group" id="advance_per_group" class="form-control bg-secondary text-white border-0" min="1" max="6" value="2" required oninput="validateGroups()">
-        </div>
+    init_modal = f"""
+<div class="modal fade" id="initModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+    <div class="modal-content bg-dark text-white border-info shadow-lg">
+      <div class="modal-header border-info">
+        <h5 class="modal-title text-info fw-bold">🎲 {T('选择赛制','Select Format')}</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
-      <div id="groupValidMsg" class="alert alert-info py-2 small mb-3" style="display:none;"></div>
-      <button type="submit" id="groupSubmitBtn" class="btn btn-warning w-100 py-3 fw-bold fs-5 disabled">✅ {T('确认分组并生成首轮','Confirm & Generate Round 1')}</button>
-    </form>
-    <small class="text-white-50 d-block mt-2">{T('当前参赛队数','Current Teams')}: <strong class="text-info">{len(teams)}</strong></small>
+      <div class="modal-body p-4">
+        <a href="/init_game" class="btn btn-outline-info w-100 py-3 fw-bold fs-5 mb-2">🔄 {T('不分组 · 直接随机循环赛','No Groups · Random Round-Robin')}</a>
+        <small class="text-white-50 d-block text-center mb-4">{T('所有队伍直接进入瑞士制循环赛（原有功能不变）','All teams enter Swiss round-robin directly')}</small>
+        <hr class="border-secondary">
+        <h6 class="text-warning fw-bold mt-3 mb-3">🏆 {T('分小组赛','Group Stage')}</h6>
+        <form action="/init_game_group" method="post">
+          <div class="row g-3 mb-3">
+            <div class="col-6">
+              <label class="small text-white-50 mb-1">{T('分几组？','Number of Groups')}</label>
+              <input type="number" name="num_groups" id="num_groups" class="form-control bg-secondary text-white border-0" min="2" max="8" value="2" required oninput="validateGroups()">
+            </div>
+            <div class="col-6">
+              <label class="small text-white-50 mb-1">{T('每组出线名额','Advance per Group')}</label>
+              <input type="number" name="advance_per_group" id="adv_pg" class="form-control bg-secondary text-white border-0" min="1" max="6" value="2" required oninput="validateGroups()">
+            </div>
+          </div>
+          <div id="groupValidMsg" class="alert py-2 small mb-3" style="display:none;"></div>
+          <small class="text-white-50 d-block mb-3">{T('当前参赛队数','Current Teams')}: <strong class="text-info">{len(teams)}</strong></small>
+          <button type="submit" id="groupSubmitBtn" class="btn btn-warning w-100 py-3 fw-bold fs-5" disabled>✅ {T('确认分组并生成首轮','Confirm & Generate Round 1')}</button>
+        </form>
+      </div>
     </div>
   </div>
-</div></div></div>
+</div>
 <script>
-var totalTeams = {len(teams)};
-function validateGroups() {{
-  var g = parseInt(document.getElementById('num_groups').value)||0;
-  var a = parseInt(document.getElementById('advance_per_group').value)||0;
-  var msg = document.getElementById('groupValidMsg');
-  var btn = document.getElementById('groupSubmitBtn');
+var totalTeams={len(teams)};
+function validateGroups(){{
+  var g=parseInt(document.getElementById('num_groups').value)||0;
+  var a=parseInt(document.getElementById('adv_pg').value)||0;
+  var msg=document.getElementById('groupValidMsg');
+  var btn=document.getElementById('groupSubmitBtn');
   msg.style.display='block';
-  if(g<2){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent='至少需要分2组';btn.classList.add('disabled');return;}}
-  var maxG = Math.floor(totalTeams/3);
-  if(g>maxG){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent=totalTeams+'支队最多可分'+maxG+'组（每组至少3支队）';btn.classList.add('disabled');return;}}
-  var minPer = Math.floor(totalTeams/g);
-  if(a>=minPer){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent='每组约'+minPer+'队，出线名额必须小于每组队数';btn.classList.add('disabled');return;}}
-  var finals = a*g;
-  if(finals<2){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent='决赛至少需要2支队';btn.classList.add('disabled');return;}}
+  if(g<2){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent='至少需要分2组';btn.disabled=true;return;}}
+  var maxG=Math.floor(totalTeams/3);
+  if(g>maxG){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent=totalTeams+'支队最多可分'+maxG+'组（每组至少3支队）';btn.disabled=true;return;}}
+  var minPer=Math.floor(totalTeams/g);
+  if(a>=minPer){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent='每组约'+minPer+'队，出线名额必须小于每组队数';btn.disabled=true;return;}}
+  if(a*g<2){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent='决赛至少需要2支队';btn.disabled=true;return;}}
   msg.className='alert alert-success py-2 small mb-3';
-  msg.textContent='✅ 配置合理：'+g+'组，每组出线'+a+'名，共'+finals+'支队参加决赛';
-  btn.classList.remove('disabled');
+  msg.textContent='✅ 配置合理：'+g+'组，每组出线'+a+'名，共'+(a*g)+'支队参加决赛';
+  btn.disabled=false;
 }}
-</script></div></div></div>""", "setup")
+</script>"""
+
+    return render_layout(
+        f"""<div class="row">
+          <div class="col-md-4">{excel_upload_html}{team_input_html}
+            <div class="glass-card p-4 shadow">
+              <h5>📅 {T('赛事存档','Tournament Archives')}</h5>
+              <div class="list-group mt-3 small mb-4">{"".join([f"<a href='/view_history/{h.id}' class='list-group-item list-group-item-action bg-transparent text-white border-secondary'>{'<span class=\"badge bg-info\">Active</span>' if h.is_active else '📁'} {h.name} ({h.owner})</a>" for h in history])}</div>
+              <div class="border-top border-secondary pt-3">
+                <h6 class="text-info small fw-bold mb-3">🆕 {T('启动新赛事','Create New Tournament')}</h6>
+                <form action="/create_new_tournament" method="post">
+                  <div class="input-group input-group-sm">
+                    <input name="new_name" class="form-control bg-dark text-white border-secondary" placeholder="Name" required>
+                    <button class="btn btn-outline-info" type="submit">{T('创建','Create')}</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-8 px-4">
+            <div class="glass-card p-4 shadow">
+              <div class="d-flex justify-content-between mb-4">
+                <h5>{T('参赛名单','Participant List')} ({len(teams)})</h5>
+                <a href="/export_excel" class="btn btn-outline-info btn-sm rounded-pill px-3 {'disabled' if not t else ''}">📥 {T('导出全记录 (Excel)','Export Full Record')}</a>
+              </div>
+              <div class="table-responsive" style="max-height: 500px;">
+                <table class="table table-dark table-hover">
+                  <thead><tr><th>{T('队伍名称','Team')}</th><th>{T('选手成员','Players')}</th><th>{T('管理','Manage')}</th></tr></thead>
+                  <tbody>{rows}</tbody>
+                </table>
+              </div>
+              <button type="button" class="btn btn-info w-100 py-3 fw-bold mt-4 fs-5 shadow-lg" {'disabled' if not t else ''} data-bs-toggle="modal" data-bs-target="#initModal">
+                🎲 {T('锁定并生成首轮对阵','Lock & Generate Round 1')}
+              </button>
+            </div>
+          </div>
+        </div>
+        {init_modal}""",
+        "setup"
+    )
 
 @app.route('/upload_teams_excel', methods=['POST'])
 def upload_teams_excel():
