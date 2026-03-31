@@ -54,6 +54,11 @@ class SystemConfig(db.Model):
     total_rounds = db.Column(db.Integer, default=5)
     scroll_ad = db.Column(db.String(500), default="📢 欢迎参加国际掼蛋大奖赛！ Welcome to the International Guandan Tournament!")
     bg_music_url = db.Column(db.String(500), default="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3")
+    # 小组赛扩展字段
+    mode = db.Column(db.Integer, default=0)             # 0=普通循环赛, 1=小组赛模式
+    num_groups = db.Column(db.Integer, default=0)       # 分几组
+    advance_per_group = db.Column(db.Integer, default=0)# 每组出线名额
+    stage = db.Column(db.String(20), default=None)      # 'group' | 'finals' | None
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -72,6 +77,9 @@ class Team(db.Model):
     seat_ns_count = db.Column(db.Integer, default=0)   # 北/南方向（或6人赛①③⑤位）出场次数
     seat_ew_count = db.Column(db.Integer, default=0)   # 东/西方向（或6人赛②④⑥位）出场次数
     had_bye = db.Column(db.Boolean, default=False)     # 是否已获得过拜轮
+    # 小组赛扩展字段
+    group_id = db.Column(db.Integer, default=0)        # 所属组号(1起)，0=普通/决赛模式
+    is_finalist = db.Column(db.Boolean, default=False) # 是否晋级决赛
 
 class Match(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -88,9 +96,10 @@ class Match(db.Model):
     pos_south = db.Column(db.String(50))
     pos_p5 = db.Column(db.String(50))
     pos_p6 = db.Column(db.String(50))
-    score_a = db.Column(db.Integer, default=-1) 
-    score_b = db.Column(db.Integer, default=-1) 
+    score_a = db.Column(db.Integer, default=-1)
+    score_b = db.Column(db.Integer, default=-1)
     is_completed = db.Column(db.Boolean, default=False)
+    group_id = db.Column(db.Integer, default=0)  # 小组赛时所属组号，0=普通/决赛
 
 class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -218,6 +227,52 @@ def swiss_pairing(t_id, round_no):
         # 极端兜底：顺序强制配对
         result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
     return result, bye_team
+
+# --- 2b. 小组赛辅助函数（新代码，不影响现有逻辑）---
+
+def validate_group_config(num_teams, num_groups, advance_per_group):
+    """验证分组配置是否符合国际规则。返回 (valid:bool, msg:str)"""
+    if num_groups < 2:
+        return False, "至少需要分2组"
+    max_groups = num_teams // 3
+    if max_groups < num_groups:
+        return False, f"{num_teams}支队伍最多可分{max_groups}组（每组至少3支队）"
+    min_per_group = num_teams // num_groups
+    if advance_per_group >= min_per_group:
+        return False, f"每组约{min_per_group}队，出线名额必须小于每组队数（当前设{advance_per_group}）"
+    total_finalists = advance_per_group * num_groups
+    if total_finalists < 2:
+        return False, "决赛至少需要2支队伍"
+    return True, f"配置合理：{num_groups}组，每组出线{advance_per_group}名，共{total_finalists}支队伍参加决赛"
+
+def group_swiss_pairing(t_id, round_no, group_id):
+    """针对单个小组内的瑞士制配对，逻辑与 swiss_pairing 完全一致"""
+    teams = Team.query.filter_by(tournament_id=t_id, group_id=group_id).all()
+    teams.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
+    total_r = get_config(t_id).total_rounds
+    bye_team = None
+    working = list(teams)
+    if len(working) % 2 == 1:
+        for team in reversed(working):
+            if not team.had_bye:
+                bye_team = team; break
+        if bye_team is None:
+            bye_team = working[-1]
+        working = [t for t in working if t.id != bye_team.id]
+    result = _backtrack_pair(working, round_no, total_r, set(), [], 0)
+    if result is None:
+        result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
+    return result, bye_team
+
+def get_group_qualifiers(t_id):
+    """按组取出线队伍（每组前 advance_per_group 名），返回 list of Team"""
+    conf = get_config(t_id)
+    qualifiers = []
+    for g in range(1, conf.num_groups + 1):
+        group_teams = Team.query.filter_by(tournament_id=t_id, group_id=g).all()
+        group_teams.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
+        qualifiers.extend(group_teams[:conf.advance_per_group])
+    return qualifiers
 
 # --- 3. UI 渲染引擎 ---
 
@@ -518,7 +573,54 @@ def setup():
     
     rows = "".join([f"<tr><td class='fw-bold text-info'>{tm.name}</td><td>{tm.players}</td><td><button class='btn btn-sm btn-outline-info me-2' data-bs-toggle='modal' data-bs-target='#edit{tm.id}'>{T('编辑','Edit')}</button><a href='/del_team/{tm.id}' class='btn btn-sm btn-outline-danger'>{T('删除','Delete')}</a></td></tr><div class='modal fade' id='edit{tm.id}'><div class='modal-dialog modal-dialog-centered'><div class='modal-content bg-dark text-white border-info'><form action='/edit_team/{tm.id}' method='post'><div class='modal-body p-4'><h5 class='mb-4 text-info fw-bold'>{T('修改参赛信息','Edit Info')}</h5><div class='mb-3'><label>{T('名称','Name')}</label><input name='name' class='form-control bg-secondary text-white border-0' value='{tm.name}'></div><div class='mb-3'><label>{T('选手','Players')}</label><input name='players' class='form-control bg-secondary text-white border-0' value='{tm.players}'></div></div><div class='modal-footer border-0'><button type='submit' class='btn btn-info w-100 fw-bold'>{T('保存修改','Save Changes')}</button></div></form></div></div></div>" for tm in teams])
     
-    return render_layout(f"""<div class="row"><div class="col-md-4">{excel_upload_html}{team_input_html}<div class="glass-card p-4 shadow"><h5>📅 {T('赛事存档','Tournament Archives')}</h5><div class="list-group mt-3 small mb-4">{"".join([f"<a href='/view_history/{h.id}' class='list-group-item list-group-item-action bg-transparent text-white border-secondary'>{'<span class=\"badge bg-info\">Active</span>' if h.is_active else '📁'} {h.name} ({h.owner})</a>" for h in history])}</div><div class="border-top border-secondary pt-3"><h6 class="text-info small fw-bold mb-3">🆕 {T('启动新赛事','Create New Tournament')}</h6><form action="/create_new_tournament" method="post"><div class="input-group input-group-sm"><input name="new_name" class="form-control bg-dark text-white border-secondary" placeholder="Name" required><button class="btn btn-outline-info" type="submit">{T('创建','Create')}</button></div></form></div></div></div><div class="col-md-8 px-4"><div class="glass-card p-4 shadow"><div class="d-flex justify-content-between mb-4"><h5>{T('参赛名单','Participant List')} ({len(teams)})</h5><a href="/export_excel" class="btn btn-outline-info btn-sm rounded-pill px-3 {'disabled' if not t else ''}">📥 {T('导出全记录 (Excel)','Export Full Record')}</a></div><div class="table-responsive" style="max-height: 500px;"><table class="table table-dark table-hover"><thead><tr><th>{T('队伍名称','Team')}</th><th>{T('选手成员','Players')}</th><th>{T('管理','Manage')}</th></tr></thead><tbody>{rows}</tbody></table></div><a href="/init_game" class="btn btn-info w-100 py-3 fw-bold mt-4 fs-5 shadow-lg {'disabled' if not t else ''}">🎲 {T('锁定并生成首轮对阵','Lock & Generate Round 1')}</a></div></div></div>""", "setup")
+    return render_layout(f"""<div class="row"><div class="col-md-4">{excel_upload_html}{team_input_html}<div class="glass-card p-4 shadow"><h5>📅 {T('赛事存档','Tournament Archives')}</h5><div class="list-group mt-3 small mb-4">{"".join([f"<a href='/view_history/{h.id}' class='list-group-item list-group-item-action bg-transparent text-white border-secondary'>{'<span class=\"badge bg-info\">Active</span>' if h.is_active else '📁'} {h.name} ({h.owner})</a>" for h in history])}</div><div class="border-top border-secondary pt-3"><h6 class="text-info small fw-bold mb-3">🆕 {T('启动新赛事','Create New Tournament')}</h6><form action="/create_new_tournament" method="post"><div class="input-group input-group-sm"><input name="new_name" class="form-control bg-dark text-white border-secondary" placeholder="Name" required><button class="btn btn-outline-info" type="submit">{T('创建','Create')}</button></div></form></div></div></div><div class="col-md-8 px-4"><div class="glass-card p-4 shadow"><div class="d-flex justify-content-between mb-4"><h5>{T('参赛名单','Participant List')} ({len(teams)})</h5><a href="/export_excel" class="btn btn-outline-info btn-sm rounded-pill px-3 {'disabled' if not t else ''}">📥 {T('导出全记录 (Excel)','Export Full Record')}</a></div><div class="table-responsive" style="max-height: 500px;"><table class="table table-dark table-hover"><thead><tr><th>{T('队伍名称','Team')}</th><th>{T('选手成员','Players')}</th><th>{T('管理','Manage')}</th></tr></thead><tbody>{rows}</tbody></table></div><button type="button" class="btn btn-info w-100 py-3 fw-bold mt-4 fs-5 shadow-lg {'disabled' if not t else ''}" {'disabled' if not t else ''} data-bs-toggle="modal" data-bs-target="#initModal">🎲 {T('锁定并生成首轮对阵','Lock & Generate Round 1')}</button>
+<!-- 首轮模式选择模态框 -->
+<div class="modal fade" id="initModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content bg-dark text-white border-info shadow-lg">
+  <div class="modal-header border-info"><h5 class="modal-title text-info fw-bold">🎲 {T('选择赛制','Select Format')}</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body p-4">
+    <div class="row g-3 mb-4">
+      <div class="col-12"><a href="/init_game" class="btn btn-outline-info w-100 py-3 fw-bold fs-5">🔄 {T('不分组 · 直接随机循环赛','No Groups · Random Round-Robin')}</a><small class="text-white-50 d-block mt-1 text-center">{T('所有队伍直接进入瑞士制循环赛（原有功能不变）','All teams enter Swiss round-robin directly')}</small></div>
+    </div>
+    <hr class="border-secondary">
+    <div class="mt-3"><h6 class="text-warning fw-bold mb-3">🏆 {T('分小组赛','Group Stage')}</h6>
+    <form action="/init_game_group" method="post" id="groupForm">
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="small text-white-50 mb-1">{T('分几组？','Number of Groups')}</label>
+          <input type="number" name="num_groups" id="num_groups" class="form-control bg-secondary text-white border-0" min="2" max="8" value="2" required oninput="validateGroups()">
+        </div>
+        <div class="col-md-6">
+          <label class="small text-white-50 mb-1">{T('每组出线名额','Advance per Group')}</label>
+          <input type="number" name="advance_per_group" id="advance_per_group" class="form-control bg-secondary text-white border-0" min="1" max="6" value="2" required oninput="validateGroups()">
+        </div>
+      </div>
+      <div id="groupValidMsg" class="alert alert-info py-2 small mb-3" style="display:none;"></div>
+      <button type="submit" id="groupSubmitBtn" class="btn btn-warning w-100 py-3 fw-bold fs-5 disabled">✅ {T('确认分组并生成首轮','Confirm & Generate Round 1')}</button>
+    </form>
+    <small class="text-white-50 d-block mt-2">{T('当前参赛队数','Current Teams')}: <strong class="text-info">{len(teams)}</strong></small>
+    </div>
+  </div>
+</div></div></div>
+<script>
+var totalTeams = {len(teams)};
+function validateGroups() {{
+  var g = parseInt(document.getElementById('num_groups').value)||0;
+  var a = parseInt(document.getElementById('advance_per_group').value)||0;
+  var msg = document.getElementById('groupValidMsg');
+  var btn = document.getElementById('groupSubmitBtn');
+  msg.style.display='block';
+  if(g<2){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent='至少需要分2组';btn.classList.add('disabled');return;}}
+  var maxG = Math.floor(totalTeams/3);
+  if(g>maxG){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent=totalTeams+'支队最多可分'+maxG+'组（每组至少3支队）';btn.classList.add('disabled');return;}}
+  var minPer = Math.floor(totalTeams/g);
+  if(a>=minPer){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent='每组约'+minPer+'队，出线名额必须小于每组队数';btn.classList.add('disabled');return;}}
+  var finals = a*g;
+  if(finals<2){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent='决赛至少需要2支队';btn.classList.add('disabled');return;}}
+  msg.className='alert alert-success py-2 small mb-3';
+  msg.textContent='✅ 配置合理：'+g+'组，每组出线'+a+'名，共'+finals+'支队参加决赛';
+  btn.classList.remove('disabled');
+}}
+</script></div></div></div>""", "setup")
 
 @app.route('/upload_teams_excel', methods=['POST'])
 def upload_teams_excel():
@@ -589,6 +691,56 @@ def init_game():
     log_act("Init Game", "Generated Round 1 (Swiss V2)", t.id); db.session.commit()
     return redirect(url_for('matches'))
 
+@app.route('/init_game_group', methods=['POST'])
+def init_game_group():
+    """小组赛初始化：随机分组 + 生成各组首轮对阵"""
+    t = get_active_t()
+    if not t: return redirect(url_for('setup'))
+    num_groups = int(request.form.get('num_groups', 2))
+    advance_per_group = int(request.form.get('advance_per_group', 1))
+    ts = Team.query.filter_by(tournament_id=t.id).all()
+    valid, msg = validate_group_config(len(ts), num_groups, advance_per_group)
+    if not valid:
+        return f"<script>alert('配置错误: {msg}');window.history.back();</script>"
+    conf = get_config(t.id)
+    conf.current_round = 1
+    conf.mode = 1
+    conf.num_groups = num_groups
+    conf.advance_per_group = advance_per_group
+    conf.stage = 'group'
+    Match.query.filter_by(tournament_id=t.id).delete()
+    for team in ts:
+        team.seat_ns_count = 0; team.seat_ew_count = 0; team.had_bye = False
+        team.current_score = 0; team.round_score = 0; team.history_opponents = ""
+        team.is_finalist = False; team.group_id = 0
+    random.shuffle(ts)
+    for i, team in enumerate(ts):
+        team.group_id = (i % num_groups) + 1
+    db.session.flush()
+    table_counter = 1
+    for g in range(1, num_groups + 1):
+        group_teams = [tm for tm in ts if tm.group_id == g]
+        bye_team = None
+        working = list(group_teams)
+        if len(working) % 2 == 1:
+            bye_team = working[-1]; working = working[:-1]
+            bye_team.had_bye = True; bye_team.current_score += 3
+            log_act("Bye Round", f"Group {g} R1 bye: {bye_team.name} (+3)", t.id)
+        for i in range(0, len(working)-1, 2):
+            t1, t2 = working[i], working[i+1]
+            p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
+            p2 = [x.strip() for x in t2.players.replace('，',',').split(',')]
+            is_6p = len(p1) >= 3 and len(p2) >= 3
+            seats = assign_seats(t1, t2, p1, p2, is_6p)
+            db.session.add(Match(tournament_id=t.id, round_no=1, table_no=table_counter,
+                                 team_a_id=t1.id, team_b_id=t2.id,
+                                 team_a_name=t1.name, team_b_name=t2.name,
+                                 group_id=g, **seats))
+            table_counter += 1
+    log_act("Init Group Stage", f"{num_groups}组，每组出线{advance_per_group}名", t.id)
+    db.session.commit()
+    return redirect(url_for('matches'))
+
 # --- 核心页面：共用生成比赛卡片代码 ---
 def generate_matches_html(t, conf, is_panorama=False):
     ms = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).all()
@@ -607,7 +759,20 @@ def generate_matches_html(t, conf, is_panorama=False):
             card += f"""<div class="modal fade" id="m{m.id}"><div class="modal-dialog modal-dialog-centered"><div class="modal-content bg-dark border-info text-white shadow-lg"><form action="/save/{m.id}" method="post"><div class="modal-body p-5 text-center"><h4 class="mb-4 text-info fw-bold">{T('第','Table')} {m.table_no} {T('桌成绩','Score')}</h4><div class="row align-items-center mb-4"><div class="col-5"><label class="small mb-3 d-block text-white-50">{m.team_a_name}</label><input name="sa" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required autofocus></div><div class="col-2 fs-2 text-info">:</div><div class="col-5"><label class="small mb-3 d-block text-white-50">{m.team_b_name}</label><input name="sb" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required></div></div></div><div class="modal-footer border-0 p-4"><button class="btn btn-info w-100 py-3 fw-bold fs-5 shadow">{T('提交成绩','Submit')}</button></div></form></div></div></div>"""
         cards.append(card)
         
-    next_btn = f'<div class="text-center mt-4"><a href="/next_r" class="btn btn-warning btn-lg px-5 py-3 fw-bold rounded-pill shadow-lg text-dark fs-4">🏁 {T("下一轮编排","Generate Next Round")}</a></div>' if ms and all(m.is_completed for m in ms) and not is_panorama else ""
+    all_done = ms and all(m.is_completed for m in ms)
+    if all_done and not is_panorama:
+        conf = get_config(t.id)
+        if conf.mode == 1 and conf.stage == 'group':
+            next_btn = (
+                f'<div class="text-center mt-4 d-flex justify-content-center gap-3">'
+                f'<a href="/next_r" class="btn btn-warning btn-lg px-5 py-3 fw-bold rounded-pill shadow-lg text-dark fs-4">🏁 {T("下一轮编排","Generate Next Round")}</a>'
+                f'<button class="btn btn-danger btn-lg px-5 py-3 fw-bold rounded-pill shadow-lg fs-4" data-bs-toggle="modal" data-bs-target="#endGroupModal">🏆 {T("小组赛结束","End Group Stage")}</button>'
+                f'</div>'
+            )
+        else:
+            next_btn = f'<div class="text-center mt-4"><a href="/next_r" class="btn btn-warning btn-lg px-5 py-3 fw-bold rounded-pill shadow-lg text-dark fs-4">🏁 {T("下一轮编排","Generate Next Round")}</a></div>'
+    else:
+        next_btn = ""
     return "".join(cards), next_btn
 
 @app.route('/matches')
@@ -617,8 +782,41 @@ def matches():
     if not t: return redirect(url_for('setup'))
     conf = get_config(t.id)
     cards_html, next_btn = generate_matches_html(t, conf, is_panorama=False)
-    
-    html = f'<div id="timer-box"><div class="small text-secondary text-center">{T("计时","Timer")}<br><input type="number" id="duration" class="bg-transparent text-info border-0 text-center fw-bold" style="width:55px; outline:none;" value="50"></div><div id="time-display">00:00</div><button onclick="startTimer()" class="btn btn-info px-4 fw-bold rounded-pill">{T("开始","Start")}</button><button id="pause-btn" onclick="togglePause()" class="btn btn-outline-warning px-4 fw-bold rounded-pill">{T("暂停","Pause")}</button></div><div class="row">{cards_html}</div>{next_btn}'
+
+    # 小组赛结束弹出框
+    end_group_modal = ""
+    if conf.mode == 1 and conf.stage == 'group':
+        qualifiers = get_group_qualifiers(t.id)
+        q_rows = "".join([
+            f'<tr><td class="text-warning fw-bold">第{q.group_id}组</td>'
+            f'<td class="text-info fw-bold">{q.name}</td>'
+            f'<td class="text-white-50">{q.players}</td>'
+            f'<td class="text-warning">{q.current_score}胜分</td></tr>'
+            for q in qualifiers
+        ])
+        end_group_modal = f"""
+        <div class="modal fade" id="endGroupModal"><div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content bg-dark text-white border-warning shadow-lg">
+          <div class="modal-header border-warning"><h5 class="modal-title text-warning fw-bold">🏆 {T('小组赛出线名单','Group Stage Qualifiers')}</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+          <div class="modal-body p-4">
+            <p class="text-white-50 small mb-3">{T('根据当前积分，以下队伍将晋级决赛循环赛','Based on current scores, the following teams advance to the finals')}：</p>
+            <table class="table table-dark table-hover text-center"><thead><tr><th>{T('小组','Group')}</th><th>{T('队伍','Team')}</th><th>{T('选手','Players')}</th><th>{T('积分','Score')}</th></tr></thead>
+            <tbody>{q_rows}</tbody></table>
+            <p class="text-white-50 small mt-3">共 <strong class="text-warning">{len(qualifiers)}</strong> 支队伍晋级决赛</p>
+          </div>
+          <div class="modal-footer border-0 p-4">
+            <form action="/confirm_finals" method="post" class="w-100">
+              <button type="submit" class="btn btn-warning w-100 py-3 fw-bold fs-5 rounded-pill shadow">✅ {T('确认出线赛队，并且开始决赛循环赛编排','Confirm Finalists & Start Finals Draw')}</button>
+            </form>
+          </div>
+        </div></div></div>"""
+
+    html = (f'<div id="timer-box"><div class="small text-secondary text-center">{T("计时","Timer")}<br>'
+            f'<input type="number" id="duration" class="bg-transparent text-info border-0 text-center fw-bold" style="width:55px; outline:none;" value="50"></div>'
+            f'<div id="time-display">00:00</div>'
+            f'<button onclick="startTimer()" class="btn btn-info px-4 fw-bold rounded-pill">{T("开始","Start")}</button>'
+            f'<button id="pause-btn" onclick="togglePause()" class="btn btn-outline-warning px-4 fw-bold rounded-pill">{T("暂停","Pause")}</button></div>'
+            f'<div class="row">{cards_html}</div>{next_btn}{end_group_modal}')
     return render_layout(html, "matches")
 
 @app.route('/panorama')
@@ -626,43 +824,93 @@ def panorama():
     t = get_active_t()
     if not t: return "No active tournament"
     conf = get_config(t.id)
-    cards_html, _ = generate_matches_html(t, conf, is_panorama=True)
-
     marquee = f'<div class="ad-ticker-pro w-100"><div class="ad-content">📢 {conf.scroll_ad} 📢</div></div>'
-
-    # Build grouping list sorted by table_no
-    ms_sorted = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).order_by(Match.table_no).all()
+    ms_all = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).order_by(Match.table_no).all()
     team_map = {team.id: team for team in Team.query.filter_by(tournament_id=t.id).all()}
-    grouping_rows = ""
-    for m in ms_sorted:
-        ta = team_map.get(m.team_a_id)
-        tb = team_map.get(m.team_b_id)
-        ta_players = ta.players if ta else m.team_a_name
-        tb_players = tb.players if tb else m.team_b_name
-        grouping_rows += (
-            f'<div style="padding:10px 0; border-bottom:1px solid rgba(255,215,0,0.2);">'
-            f'<span style="color:#FFD700; font-weight:900; font-size:1.25rem; margin-right:12px;">（{m.table_no}）号桌</span>'
-            f'<span style="color:#7EC8E3; font-weight:700;">{m.team_a_name}</span>'
-            f'<span style="color:rgba(255,255,255,0.75); font-size:1rem;">（{ta_players}）</span>'
-            f'<span style="color:rgba(255,255,255,0.5); margin:0 10px;">vs</span>'
-            f'<span style="color:#F9A8D4; font-weight:700;">{m.team_b_name}</span>'
-            f'<span style="color:rgba(255,255,255,0.75); font-size:1rem;">（{tb_players}）</span>'
-            f'</div>'
-        )
-    grouping_box = (
-        f'<div class="container-fluid px-5 mt-5 mb-5">'
-        f'<div style="background:rgba(255,215,0,0.08); border:2px solid #FFD700; border-radius:16px; padding:30px 40px; box-shadow:0 0 30px rgba(255,215,0,0.15);">'
-        f'<div style="color:#FFD700; font-size:1.5rem; font-weight:900; letter-spacing:2px; margin-bottom:18px;">📋 第{conf.current_round}轮 参赛分组</div>'
-        f'<div style="font-size:1.15rem; line-height:1.8;">{grouping_rows}</div>'
-        f'<div style="margin-top:28px; text-align:center;">'
-        f'<a href="/export_grouping" style="display:inline-block; background:linear-gradient(135deg,#F59E0B,#D97706); color:#fff; font-size:1.1rem; font-weight:800; padding:14px 48px; border-radius:50px; text-decoration:none; letter-spacing:1px; box-shadow:0 4px 20px rgba(245,158,11,0.4);">📥 导出参赛分组信息</a>'
-        f'</div>'
-        f'</div>'
-        f'</div>'
-    )
 
-    html = f'{marquee}<div class="container-fluid px-5 mt-4"><div id="timer-box" style="transform: scale(1.2); margin-top:20px; margin-bottom: 50px;"><div id="time-display" style="margin:0 30px;">--:--</div></div><div class="row">{cards_html}</div></div>{grouping_box}<script>window.onload = function() {{ initPanoramaDisplay(); startTimer(); }};</script>'
+    if conf.mode == 1 and conf.stage == 'group':
+        # ===== 小组赛全景：按组分块显示 =====
+        GROUP_COLORS = ['#60A5FA','#34D399','#FBBF24','#F87171','#A78BFA','#FB923C','#38BDF8','#4ADE80']
+        groups_html = ""
+        for g in range(1, conf.num_groups + 1):
+            color = GROUP_COLORS[(g-1) % len(GROUP_COLORS)]
+            g_matches = [m for m in ms_all if (m.group_id or 0) == g]
+            g_cards = []
+            for m in g_matches:
+                is_6p = bool(m.pos_p5 and m.pos_p6)
+                if is_6p:
+                    seats_html = f'<div class="seat-player pos-6-1">① {m.pos_north}</div><div class="seat-player pos-6-2">② {m.pos_p5}</div><div class="seat-player pos-6-3">③ {m.pos_east}</div><div class="seat-player pos-6-4">④ {m.pos_south}</div><div class="seat-player pos-6-5">⑤ {m.pos_p6}</div><div class="seat-player pos-6-6">⑥ {m.pos_west}</div>'
+                else:
+                    seats_html = f'<div class="seat-player pos-4-n">[N] {m.pos_north}</div><div class="seat-player pos-4-e">[E] {m.pos_east}</div><div class="seat-player pos-4-s">[S] {m.pos_south}</div><div class="seat-player pos-4-w">[W] {m.pos_west}</div>'
+                g_cards.append(f'<div class="col-md-4 mb-4"><div class="glass-card p-3 shadow-sm" style="background:rgba(45,55,72,0.4);border-top:3px solid {color};"><div class="seat-wrapper">{seats_html}<div class="table-circle table-{"red" if m.is_completed else "blue"}">T-{m.table_no}</div></div><div class="mt-4 text-center bg-black bg-opacity-25 py-2 rounded"><span class="badge bg-primary px-3">{m.team_a_name}</span> VS <span class="badge bg-secondary px-3">{m.team_b_name}</span></div></div></div>')
+            # 本组分组信息列表
+            g_rows = ""
+            for m in g_matches:
+                ta = team_map.get(m.team_a_id); tb = team_map.get(m.team_b_id)
+                g_rows += (f'<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);">'
+                           f'<span style="color:{color};font-weight:900;margin-right:10px;">（{m.table_no}）号桌</span>'
+                           f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                           f'<span style="color:rgba(255,255,255,0.6);"> ({ta.players if ta else ""}) </span>'
+                           f'<span style="color:rgba(255,255,255,0.4);margin:0 8px;">vs</span>'
+                           f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span>'
+                           f'<span style="color:rgba(255,255,255,0.6);"> ({tb.players if tb else ""})</span>'
+                           f'</div>')
+            groups_html += (
+                f'<div class="mb-5" style="border:2px solid {color};border-radius:16px;padding:24px 32px;background:rgba(0,0,0,0.2);">'
+                f'<div style="color:{color};font-size:1.6rem;font-weight:900;letter-spacing:3px;margin-bottom:18px;">第{g}组 · Group {g}</div>'
+                f'<div class="row">{"".join(g_cards)}</div>'
+                f'<div style="font-size:1.05rem;line-height:1.9;margin-top:12px;">{g_rows}</div>'
+                f'</div>'
+            )
+        cards_section = f'<div class="container-fluid px-5 mt-4">{groups_html}</div>'
+        stage_label = f'<div style="text-align:center;color:#FBBF24;font-size:1.1rem;font-weight:700;margin:10px 0 20px;letter-spacing:2px;">🏟 第{conf.current_round}轮 小组赛 | {conf.num_groups}组赛制 · 每组出线{conf.advance_per_group}名</div>'
+        grouping_box = stage_label
+    elif conf.mode == 1 and conf.stage == 'finals':
+        # ===== 决赛全景：普通布局 + 标记决赛 =====
+        cards_html, _ = generate_matches_html(t, conf, is_panorama=True)
+        grouping_rows = ""
+        for m in ms_all:
+            ta = team_map.get(m.team_a_id); tb = team_map.get(m.team_b_id)
+            grouping_rows += (f'<div style="padding:10px 0;border-bottom:1px solid rgba(255,215,0,0.2);">'
+                              f'<span style="color:#FFD700;font-weight:900;font-size:1.25rem;margin-right:12px;">（{m.table_no}）号桌</span>'
+                              f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                              f'<span style="color:rgba(255,255,255,0.75);"> ({ta.players if ta else m.team_a_name}) </span>'
+                              f'<span style="color:rgba(255,255,255,0.5);margin:0 10px;">vs</span>'
+                              f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span>'
+                              f'<span style="color:rgba(255,255,255,0.75);"> ({tb.players if tb else m.team_b_name})</span>'
+                              f'</div>')
+        cards_section = f'<div class="container-fluid px-5 mt-4"><div class="row">{cards_html}</div></div>'
+        grouping_box = (f'<div class="container-fluid px-5 mt-5 mb-5">'
+                        f'<div style="background:rgba(255,215,0,0.08);border:2px solid #FFD700;border-radius:16px;padding:30px 40px;">'
+                        f'<div style="color:#FFD700;font-size:1.5rem;font-weight:900;letter-spacing:2px;margin-bottom:18px;">🏆 决赛 · Finals — 第{conf.current_round}轮</div>'
+                        f'<div style="font-size:1.15rem;line-height:1.8;">{grouping_rows}</div>'
+                        f'<div style="margin-top:28px;text-align:center;"><a href="/export_grouping" style="display:inline-block;background:linear-gradient(135deg,#F59E0B,#D97706);color:#fff;font-size:1.1rem;font-weight:800;padding:14px 48px;border-radius:50px;text-decoration:none;">📥 导出对阵信息</a></div>'
+                        f'</div></div>')
+    else:
+        # ===== 普通循环赛全景：原有逻辑 =====
+        cards_html, _ = generate_matches_html(t, conf, is_panorama=True)
+        grouping_rows = ""
+        for m in ms_all:
+            ta = team_map.get(m.team_a_id); tb = team_map.get(m.team_b_id)
+            ta_players = ta.players if ta else m.team_a_name
+            tb_players = tb.players if tb else m.team_b_name
+            grouping_rows += (f'<div style="padding:10px 0;border-bottom:1px solid rgba(255,215,0,0.2);">'
+                              f'<span style="color:#FFD700;font-weight:900;font-size:1.25rem;margin-right:12px;">（{m.table_no}）号桌</span>'
+                              f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                              f'<span style="color:rgba(255,255,255,0.75);font-size:1rem;">（{ta_players}）</span>'
+                              f'<span style="color:rgba(255,255,255,0.5);margin:0 10px;">vs</span>'
+                              f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span>'
+                              f'<span style="color:rgba(255,255,255,0.75);font-size:1rem;">（{tb_players}）</span>'
+                              f'</div>')
+        cards_section = f'<div class="container-fluid px-5 mt-4"><div class="row">{cards_html}</div></div>'
+        grouping_box = (f'<div class="container-fluid px-5 mt-5 mb-5">'
+                        f'<div style="background:rgba(255,215,0,0.08);border:2px solid #FFD700;border-radius:16px;padding:30px 40px;box-shadow:0 0 30px rgba(255,215,0,0.15);">'
+                        f'<div style="color:#FFD700;font-size:1.5rem;font-weight:900;letter-spacing:2px;margin-bottom:18px;">📋 第{conf.current_round}轮 参赛分组</div>'
+                        f'<div style="font-size:1.15rem;line-height:1.8;">{grouping_rows}</div>'
+                        f'<div style="margin-top:28px;text-align:center;"><a href="/export_grouping" style="display:inline-block;background:linear-gradient(135deg,#F59E0B,#D97706);color:#fff;font-size:1.1rem;font-weight:800;padding:14px 48px;border-radius:50px;text-decoration:none;letter-spacing:1px;box-shadow:0 4px 20px rgba(245,158,11,0.4);">📥 导出参赛分组信息</a></div>'
+                        f'</div></div>')
 
+    html = f'{marquee}<div class="container-fluid px-5 mt-2"><div id="timer-box" style="transform:scale(1.2);margin-top:20px;margin-bottom:50px;"><div id="time-display" style="margin:0 30px;">--:--</div></div></div>{cards_section}{grouping_box}<script>window.onload=function(){{initPanoramaDisplay();startTimer();}};</script>'
     return render_layout(html, active="panorama", hide_nav=True)
 
 @app.route('/export_grouping')
@@ -711,22 +959,113 @@ def save(mid):
     db.session.commit()
     return redirect(url_for('matches'))
 
+def _team_score_row(i, team, show_group=False):
+    group_badge = f'<span class="badge bg-secondary me-1">第{team.group_id}组</span>' if show_group and team.group_id else ''
+    row = (f"<tr><td>{i+1}</td><td class='text-info fw-bold'>{group_badge}{team.name}</td>"
+           f"<td class='text-warning'>{team.current_score}</td><td class='text-success'>{team.round_score}</td>"
+           f"<td>{team.players} <a href='#' data-bs-toggle='modal' data-bs-target='#editScore{team.id}' class='text-secondary ms-2' style='text-decoration:none;'>✎</a></td></tr>")
+    modal = (f"<div class='modal fade' id='editScore{team.id}'><div class='modal-dialog modal-dialog-centered'><div class='modal-content bg-dark text-white border-warning shadow-lg'>"
+             f"<form action='/adjust_score/{team.id}' method='post'><div class='modal-body p-4 text-start'>"
+             f"<h5 class='text-warning fw-bold mb-4'>修正成绩: {team.name}</h5>"
+             f"<div class='mb-3'><label class='small opacity-75'>累计胜分</label><input name='c_score' type='number' class='form-control bg-secondary text-white border-0 py-2' value='{team.current_score}'></div>"
+             f"<div class='mb-4'><label class='small opacity-75'>累计级分</label><input name='r_score' type='number' class='form-control bg-secondary text-white border-0 py-2' value='{team.round_score}'></div>"
+             f"<button type='submit' class='btn btn-warning w-100 fw-bold py-2'>确认修正</button>"
+             f"</div></form></div></div></div>")
+    return row + modal
+
 @app.route('/leaderboard')
 def leaderboard():
     t = get_active_t()
     if not t: return redirect(url_for('setup'))
     conf = get_config(t.id)
-    ts = Team.query.filter_by(tournament_id=t.id).all()
-    ts.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
-    
-    rows = "".join([f"<tr><td>{i+1}</td><td class='text-info fw-bold'>{team.name}</td><td class='text-warning'>{team.current_score}</td><td class='text-success'>{team.round_score}</td><td>{team.players} <a href='#' data-bs-toggle='modal' data-bs-target='#editScore{team.id}' class='text-secondary ms-2' style='text-decoration:none;'>✎</a></td></tr>" + 
-    f"""<div class='modal fade' id='editScore{team.id}'><div class='modal-dialog modal-dialog-centered'><div class='modal-content bg-dark text-white border-warning shadow-lg'><form action='/adjust_score/{team.id}' method='post'><div class='modal-body p-4 text-start'><h5 class='text-warning fw-bold mb-4'>{T('修正成绩', 'Adjust Score')}: {team.name}</h5><div class='mb-3'><label class='small opacity-75'>{T('累计胜分 (总分)', 'Win Pts')}</label><input name='c_score' type='number' class='form-control bg-secondary text-white border-0 py-2' value='{team.current_score}'></div><div class='mb-4'><label class='small opacity-75'>{T('累计级分 (小分)', 'Round Pts')}</label><input name='r_score' type='number' class='form-control bg-secondary text-white border-0 py-2' value='{team.round_score}'></div><button type='submit' class='btn btn-warning w-100 fw-bold py-2'>{T('确认修正', 'Confirm')}</button></div></form></div></div></div>""" 
-    for i, team in enumerate(ts)])
-    
-    aw, as2, ab = (ts[0] if len(ts)>0 else None), (ts[1] if len(ts)>1 else None), (ts[2] if len(ts)>2 else None)
-    award_modal = f"""<div class="modal fade" id="awardModal"><div class="modal-dialog modal-fullscreen"><div class="modal-content text-center text-white" style="background: radial-gradient(circle, #1e293b 0%, #0f172a 100%);"><audio id="victoryMusic" loop><source src="{conf.bg_music_url}" type="audio/mpeg"></audio><div class="container py-5"><h1 class="display-1 text-warning fw-bold mb-5">🏆 {t.name} {T('荣耀颁奖', 'Awards')}</h1><div class="glass-card p-5 border-warning w-75 mx-auto mb-5 shadow-lg"><p class="display-4 text-warning mb-2">🥇 {T('冠 军', 'Champion')}</p><h1 class="display-2 fw-bold">{aw.name if aw else '-'}</h1><p class='fs-2 text-info mt-3'>{aw.players if aw else ''}</p></div><div class="row w-75 mx-auto gap-4"><div class="col glass-card p-4 border-info"><p class="h2 text-info mb-2">🥈 {T('亚 军', 'Runner-up')}</p><h2>{as2.name if as2 else '-'}</h2><p class='text-info opacity-75 fs-4 mt-2'>{as2.players if as2 else ''}</p></div><div class="col glass-card p-4 border-light"><p class="h2 text-light mb-2">🥉 {T('季 军', 'Third Place')}</p><h2>{ab.name if ab else '-'}</h2><p class='text-light opacity-75 fs-4 mt-2'>{ab.players if ab else ''}</p></div></div><div class="mt-5"><button class="btn btn-outline-danger btn-lg rounded-pill" onclick="document.getElementById('victoryMusic').pause();" data-bs-dismiss="modal">{T('返回后台', 'Return')}</button></div></div><script>document.getElementById('awardModal').addEventListener('shown.bs.modal', function(){{ document.getElementById('victoryMusic').play().catch(e=>console.log('Block')); }});</script></div></div></div>"""
-    
-    return render_layout(f'<div class="d-flex justify-content-between align-items-center mb-4"><div><h3 class="text-info fw-bold m-0">📊 {T("实时积分排行榜","Live Leaderboard")}</h3><small class="text-white-50">{T("点击队员名旁的 ✎ 可手动微调成绩","Click ✎ to adjust score manually")}</small></div></div><div class="glass-card p-5 shadow-lg"><div class="table-responsive"><table class="table table-dark table-hover text-center align-middle"><thead><tr><th>{T("名次","Rank")}</th><th>{T("队伍","Team")}</th><th>{T("总胜分","Win Pts")}</th><th>{T("总级分","Round Pts")}</th><th>{T("选手 (编辑)","Players (Edit)")}</th></tr></thead><tbody>{rows}</tbody></table></div><button class="btn btn-warning w-100 py-4 mt-4 fw-bold rounded-pill shadow-lg fs-4" data-bs-toggle="modal" data-bs-target="#awardModal">🎊 {T("开启颁奖大屏", "Open Awards Screen")}</button></div>{award_modal}', "leaderboard")
+    all_teams = Team.query.filter_by(tournament_id=t.id).all()
+
+    GROUP_COLORS = ['#60A5FA','#34D399','#FBBF24','#F87171','#A78BFA','#FB923C','#38BDF8','#4ADE80']
+
+    if conf.mode == 1 and conf.stage == 'group':
+        # ===== 小组赛积分榜：按组分块 =====
+        table_html = ""
+        for g in range(1, conf.num_groups + 1):
+            color = GROUP_COLORS[(g-1) % len(GROUP_COLORS)]
+            g_teams = [tm for tm in all_teams if (tm.group_id or 0) == g]
+            g_teams.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
+            g_rows = "".join([_team_score_row(i+1, tm) for i, tm in enumerate(g_teams)])
+            table_html += (
+                f'<div class="mb-4" style="border:2px solid {color};border-radius:12px;overflow:hidden;">'
+                f'<div style="background:{color}22;padding:12px 20px;color:{color};font-weight:900;font-size:1.1rem;">第{g}组 · Group {g}</div>'
+                f'<div class="table-responsive"><table class="table table-dark table-hover text-center align-middle mb-0">'
+                f'<thead><tr><th>名次</th><th>队伍</th><th>总胜分</th><th>总级分</th><th>选手</th></tr></thead>'
+                f'<tbody>{g_rows}</tbody></table></div></div>'
+            )
+        # 颁奖屏用全部队伍最高分
+        all_teams.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
+        aw, as2, ab = (all_teams[0] if len(all_teams)>0 else None), (all_teams[1] if len(all_teams)>1 else None), (all_teams[2] if len(all_teams)>2 else None)
+        stage_info = f'<div class="badge bg-warning text-dark fs-6 mb-3">🏟 小组循环赛进行中 · {conf.num_groups}组 · 每组出线{conf.advance_per_group}名</div>'
+        content = f'<h3 class="text-info fw-bold mb-2">📊 实时积分排行榜</h3>{stage_info}{table_html}'
+
+    elif conf.mode == 1 and conf.stage == 'finals':
+        # ===== 决赛积分榜：决赛队在上，各小组成绩在下 =====
+        finalists = [tm for tm in all_teams if tm.is_finalist]
+        finalists.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
+        f_rows = "".join([_team_score_row(i+1, tm, show_group=True) for i, tm in enumerate(finalists)])
+        finals_table = (
+            f'<div class="mb-4" style="border:2px solid #FFD700;border-radius:12px;overflow:hidden;">'
+            f'<div style="background:rgba(255,215,0,0.12);padding:12px 20px;color:#FFD700;font-weight:900;font-size:1.1rem;">🏆 决赛排行榜 · Finals Leaderboard</div>'
+            f'<div class="table-responsive"><table class="table table-dark table-hover text-center align-middle mb-0">'
+            f'<thead><tr><th>名次</th><th>队伍</th><th>决赛胜分</th><th>决赛级分</th><th>选手</th></tr></thead>'
+            f'<tbody>{f_rows}</tbody></table></div></div>'
+        )
+        # 各组成绩（小字）
+        group_tables = '<div class="mt-4"><small class="text-white-50 d-block mb-2">📋 小组赛成绩存档：</small>'
+        for g in range(1, conf.num_groups + 1):
+            color = GROUP_COLORS[(g-1) % len(GROUP_COLORS)]
+            g_teams = [tm for tm in all_teams if (tm.group_id or 0) == g]
+            # 小组赛成绩已被决赛重置，仅显示名单
+            group_tables += (f'<div class="mb-2 p-2 rounded" style="background:rgba(255,255,255,0.03);border-left:3px solid {color};">'
+                             f'<span style="color:{color};font-weight:700;">第{g}组：</span>'
+                             + '，'.join([f'<span class="{"text-warning fw-bold" if tm.is_finalist else "text-white-50"}">{tm.name}{"✅" if tm.is_finalist else ""}</span>' for tm in g_teams])
+                             + '</div>')
+        group_tables += '</div>'
+        aw = finalists[0] if len(finalists)>0 else None
+        as2 = finalists[1] if len(finalists)>1 else None
+        ab = finalists[2] if len(finalists)>2 else None
+        stage_info = f'<div class="badge bg-danger fs-6 mb-3">🏆 决赛循环赛进行中 · {len(finalists)}支队伍</div>'
+        content = f'<h3 class="text-info fw-bold mb-2">📊 实时积分排行榜</h3>{stage_info}{finals_table}{group_tables}'
+
+    else:
+        # ===== 普通循环赛：原有逻辑 =====
+        all_teams.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
+        rows = "".join([_team_score_row(i+1, tm) for i, tm in enumerate(all_teams)])
+        aw = all_teams[0] if len(all_teams)>0 else None
+        as2 = all_teams[1] if len(all_teams)>1 else None
+        ab = all_teams[2] if len(all_teams)>2 else None
+        content = (f'<div class="d-flex justify-content-between align-items-center mb-4"><div>'
+                   f'<h3 class="text-info fw-bold m-0">📊 {T("实时积分排行榜","Live Leaderboard")}</h3>'
+                   f'<small class="text-white-50">{T("点击队员名旁的 ✎ 可手动微调成绩","Click ✎ to adjust score manually")}</small>'
+                   f'</div></div>'
+                   f'<div class="glass-card p-5 shadow-lg"><div class="table-responsive">'
+                   f'<table class="table table-dark table-hover text-center align-middle">'
+                   f'<thead><tr><th>{T("名次","Rank")}</th><th>{T("队伍","Team")}</th><th>{T("总胜分","Win Pts")}</th><th>{T("总级分","Round Pts")}</th><th>{T("选手 (编辑)","Players (Edit)")}</th></tr></thead>'
+                   f'<tbody>{rows}</tbody></table></div>')
+
+    award_modal = (f'<div class="modal fade" id="awardModal"><div class="modal-dialog modal-fullscreen">'
+                   f'<div class="modal-content text-center text-white" style="background:radial-gradient(circle,#1e293b 0%,#0f172a 100%);">'
+                   f'<audio id="victoryMusic" loop><source src="{conf.bg_music_url}" type="audio/mpeg"></audio>'
+                   f'<div class="container py-5">'
+                   f'<h1 class="display-1 text-warning fw-bold mb-5">🏆 {t.name} {T("荣耀颁奖","Awards")}</h1>'
+                   f'<div class="glass-card p-5 border-warning w-75 mx-auto mb-5 shadow-lg"><p class="display-4 text-warning mb-2">🥇 {T("冠 军","Champion")}</p><h1 class="display-2 fw-bold">{aw.name if aw else "-"}</h1><p class="fs-2 text-info mt-3">{aw.players if aw else ""}</p></div>'
+                   f'<div class="row w-75 mx-auto gap-4"><div class="col glass-card p-4 border-info"><p class="h2 text-info mb-2">🥈 {T("亚 军","Runner-up")}</p><h2>{as2.name if as2 else "-"}</h2><p class="text-info opacity-75 fs-4 mt-2">{as2.players if as2 else ""}</p></div>'
+                   f'<div class="col glass-card p-4 border-light"><p class="h2 text-light mb-2">🥉 {T("季 军","Third Place")}</p><h2>{ab.name if ab else "-"}</h2><p class="text-light opacity-75 fs-4 mt-2">{ab.players if ab else ""}</p></div></div>'
+                   f'<div class="mt-5"><button class="btn btn-outline-danger btn-lg rounded-pill" onclick="document.getElementById(\'victoryMusic\').pause();" data-bs-dismiss="modal">{T("返回后台","Return")}</button></div>'
+                   f'</div><script>document.getElementById("awardModal").addEventListener("shown.bs.modal",function(){{document.getElementById("victoryMusic").play().catch(e=>console.log("Block"));}});</script>'
+                   f'</div></div></div>')
+
+    award_btn = f'<button class="btn btn-warning w-100 py-4 mt-4 fw-bold rounded-pill shadow-lg fs-4" data-bs-toggle="modal" data-bs-target="#awardModal">🎊 {T("开启颁奖大屏","Open Awards Screen")}</button>'
+
+    if conf.mode == 1 and conf.stage in ('group', 'finals'):
+        return render_layout(f'<div class="glass-card p-4 shadow-lg">{content}{award_btn}</div>{award_modal}', "leaderboard")
+    else:
+        return render_layout(f'{content}{award_btn}</div>{award_modal}', "leaderboard")
 
 @app.route('/adjust_score/<int:tid>', methods=['POST'])
 def adjust_score(tid):
@@ -891,25 +1230,115 @@ def edit_team_data(tid):
         db.session.commit(); log_act("Edit Team", f"Target: {tm.name}", t.id if t else None)
     return redirect(url_for('setup'))
 
-@app.route('/next_r')
-def next_r():
+@app.route('/confirm_finals', methods=['POST'])
+def confirm_finals():
+    """确认小组赛出线队伍，切换到决赛循环赛"""
     t = get_active_t()
-    conf = get_config(t.id); conf.current_round += 1
-    pairs, bye_team = swiss_pairing(t.id, conf.current_round)
-    # 拜轮队自动获得 3 胜分
-    if bye_team:
-        bye_team.had_bye = True
-        bye_team.current_score += 3
-        log_act("Bye Round", f"Round {conf.current_round} bye: {bye_team.name} (+3 win pts)", t.id)
-    for i, (t1, t2) in enumerate(pairs):
+    if not t: return redirect(url_for('setup'))
+    conf = get_config(t.id)
+    qualifiers = get_group_qualifiers(t.id)
+    # 标记晋级队伍，重置决赛积分（保留历史）
+    for team in Team.query.filter_by(tournament_id=t.id).all():
+        team.is_finalist = False
+    for q in qualifiers:
+        q.is_finalist = True
+        q.current_score = 0; q.round_score = 0
+        q.history_opponents = ""; q.had_bye = False
+        q.seat_ns_count = 0; q.seat_ew_count = 0
+    conf.stage = 'finals'
+    conf.current_round = 1
+    db.session.flush()
+    # 生成决赛第一轮（仅晋级队，使用普通 swiss pairing）
+    random.shuffle(qualifiers)
+    bye_team = None
+    working = list(qualifiers)
+    if len(working) % 2 == 1:
+        bye_team = working[-1]; working = working[:-1]
+        bye_team.had_bye = True; bye_team.current_score += 3
+        log_act("Bye Round", f"Finals R1 bye: {bye_team.name} (+3)", t.id)
+    for i in range(0, len(working)-1, 2):
+        t1, t2 = working[i], working[i+1]
         p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
         p2 = [x.strip() for x in t2.players.replace('，',',').split(',')]
         is_6p = len(p1) >= 3 and len(p2) >= 3
         seats = assign_seats(t1, t2, p1, p2, is_6p)
-        db.session.add(Match(tournament_id=t.id, round_no=conf.current_round, table_no=i+1,
+        db.session.add(Match(tournament_id=t.id, round_no=1, table_no=i//2+1,
                              team_a_id=t1.id, team_b_id=t2.id,
-                             team_a_name=t1.name, team_b_name=t2.name, **seats))
-    log_act("Next Round", f"Round {conf.current_round} (Swiss V2)", t.id); db.session.commit()
+                             team_a_name=t1.name, team_b_name=t2.name,
+                             group_id=0, **seats))
+    log_act("Start Finals", f"{len(qualifiers)}支队伍参加决赛循环赛", t.id)
+    db.session.commit()
+    return redirect(url_for('matches'))
+
+@app.route('/next_r')
+def next_r():
+    t = get_active_t()
+    conf = get_config(t.id)
+    conf.current_round += 1
+    if conf.mode == 1 and conf.stage == 'group':
+        # 小组赛模式：对每个小组分别进行瑞士制配对
+        table_counter = 1
+        for g in range(1, conf.num_groups + 1):
+            pairs, bye_team = group_swiss_pairing(t.id, conf.current_round, g)
+            if bye_team:
+                bye_team.had_bye = True; bye_team.current_score += 3
+                log_act("Bye Round", f"Group {g} R{conf.current_round} bye: {bye_team.name}", t.id)
+            for t1, t2 in pairs:
+                p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
+                p2 = [x.strip() for x in t2.players.replace('，',',').split(',')]
+                is_6p = len(p1) >= 3 and len(p2) >= 3
+                seats = assign_seats(t1, t2, p1, p2, is_6p)
+                db.session.add(Match(tournament_id=t.id, round_no=conf.current_round, table_no=table_counter,
+                                     team_a_id=t1.id, team_b_id=t2.id,
+                                     team_a_name=t1.name, team_b_name=t2.name,
+                                     group_id=g, **seats))
+                table_counter += 1
+        log_act("Next Round (Group)", f"Round {conf.current_round} all groups", t.id)
+    else:
+        # 普通循环赛 / 决赛：原有逻辑不变
+        if conf.mode == 1 and conf.stage == 'finals':
+            # 决赛只对晋级队配对
+            finalist_ids = [tm.id for tm in Team.query.filter_by(tournament_id=t.id, is_finalist=True).all()]
+            teams = Team.query.filter(Team.id.in_(finalist_ids)).all()
+            teams.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
+            total_r = conf.total_rounds
+            bye_team = None
+            working = list(teams)
+            if len(working) % 2 == 1:
+                for team in reversed(working):
+                    if not team.had_bye: bye_team = team; break
+                if bye_team is None: bye_team = working[-1]
+                working = [tm for tm in working if tm.id != bye_team.id]
+                bye_team.had_bye = True; bye_team.current_score += 3
+                log_act("Bye Round", f"Finals R{conf.current_round} bye: {bye_team.name}", t.id)
+            result = _backtrack_pair(working, conf.current_round, total_r, set(), [], 0)
+            if result is None:
+                result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
+            for i, (t1, t2) in enumerate(result):
+                p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
+                p2 = [x.strip() for x in t2.players.replace('，',',').split(',')]
+                is_6p = len(p1) >= 3 and len(p2) >= 3
+                seats = assign_seats(t1, t2, p1, p2, is_6p)
+                db.session.add(Match(tournament_id=t.id, round_no=conf.current_round, table_no=i+1,
+                                     team_a_id=t1.id, team_b_id=t2.id,
+                                     team_a_name=t1.name, team_b_name=t2.name,
+                                     group_id=0, **seats))
+            log_act("Next Round (Finals)", f"Round {conf.current_round}", t.id)
+        else:
+            pairs, bye_team = swiss_pairing(t.id, conf.current_round)
+            if bye_team:
+                bye_team.had_bye = True; bye_team.current_score += 3
+                log_act("Bye Round", f"Round {conf.current_round} bye: {bye_team.name} (+3 win pts)", t.id)
+            for i, (t1, t2) in enumerate(pairs):
+                p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
+                p2 = [x.strip() for x in t2.players.replace('，',',').split(',')]
+                is_6p = len(p1) >= 3 and len(p2) >= 3
+                seats = assign_seats(t1, t2, p1, p2, is_6p)
+                db.session.add(Match(tournament_id=t.id, round_no=conf.current_round, table_no=i+1,
+                                     team_a_id=t1.id, team_b_id=t2.id,
+                                     team_a_name=t1.name, team_b_name=t2.name, **seats))
+            log_act("Next Round", f"Round {conf.current_round} (Swiss V2)", t.id)
+    db.session.commit()
     return redirect(url_for('matches'))
 
 @app.route('/logout')
@@ -932,6 +1361,21 @@ def init_db():
         try: db.session.execute(text("ALTER TABLE team ADD COLUMN seat_ew_count INTEGER DEFAULT 0")); db.session.commit()
         except Exception: db.session.rollback()
         try: db.session.execute(text("ALTER TABLE team ADD COLUMN had_bye BOOLEAN DEFAULT FALSE")); db.session.commit()
+        except Exception: db.session.rollback()
+        # 小组赛扩展迁移
+        try: db.session.execute(text("ALTER TABLE system_config ADD COLUMN mode INTEGER DEFAULT 0")); db.session.commit()
+        except Exception: db.session.rollback()
+        try: db.session.execute(text("ALTER TABLE system_config ADD COLUMN num_groups INTEGER DEFAULT 0")); db.session.commit()
+        except Exception: db.session.rollback()
+        try: db.session.execute(text("ALTER TABLE system_config ADD COLUMN advance_per_group INTEGER DEFAULT 0")); db.session.commit()
+        except Exception: db.session.rollback()
+        try: db.session.execute(text("ALTER TABLE system_config ADD COLUMN stage VARCHAR(20)")); db.session.commit()
+        except Exception: db.session.rollback()
+        try: db.session.execute(text("ALTER TABLE team ADD COLUMN group_id INTEGER DEFAULT 0")); db.session.commit()
+        except Exception: db.session.rollback()
+        try: db.session.execute(text("ALTER TABLE team ADD COLUMN is_finalist BOOLEAN DEFAULT FALSE")); db.session.commit()
+        except Exception: db.session.rollback()
+        try: db.session.execute(text("ALTER TABLE match ADD COLUMN group_id INTEGER DEFAULT 0")); db.session.commit()
         except Exception: db.session.rollback()
         if not User.query.filter_by(username='admin').first():
             db.session.add(User(username='admin', password=generate_password_hash('123')))
