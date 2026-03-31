@@ -575,53 +575,111 @@ def setup():
     
     init_modal = f"""
 <div class="modal fade" id="initModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
-    <div class="modal-content bg-dark text-white border-info shadow-lg">
-      <div class="modal-header border-info">
-        <h5 class="modal-title text-info fw-bold">🎲 {T('选择赛制','Select Format')}</h5>
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content border-info shadow-lg" style="background:#1e293b;color:#f1f5f9;">
+      <div class="modal-header" style="border-bottom:1px solid #06b6d4;">
+        <h5 class="modal-title fw-bold" style="color:#06b6d4;">🎲 {T('选择赛制','Select Format')}</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body p-4">
-        <a href="/init_game" class="btn btn-outline-info w-100 py-3 fw-bold fs-5 mb-2">🔄 {T('不分组 · 直接随机循环赛','No Groups · Random Round-Robin')}</a>
-        <small class="text-white-50 d-block text-center mb-4">{T('所有队伍直接进入瑞士制循环赛（原有功能不变）','All teams enter Swiss round-robin directly')}</small>
-        <hr class="border-secondary">
-        <h6 class="text-warning fw-bold mt-3 mb-3">🏆 {T('分小组赛','Group Stage')}</h6>
-        <form action="/init_game_group" method="post">
-          <div class="row g-3 mb-3">
-            <div class="col-6">
-              <label class="small text-white-50 mb-1">{T('分几组？','Number of Groups')}</label>
-              <input type="number" name="num_groups" id="num_groups" class="form-control bg-secondary text-white border-0" min="2" max="8" value="2" required oninput="validateGroups()">
+        <p class="text-white-50 small mb-3">当前参赛队数：<strong style="color:#06b6d4;">{len(teams)}</strong> 支</p>
+
+        <!-- 选项1 -->
+        <label style="display:block;cursor:pointer;padding:16px;border-radius:10px;border:2px solid rgba(6,182,212,0.3);margin-bottom:12px;background:rgba(6,182,212,0.05);" onclick="selectMode(1)">
+          <input type="radio" name="formatMode" id="mode1" value="1" style="width:18px;height:18px;vertical-align:middle;margin-right:10px;accent-color:#06b6d4;">
+          <span style="font-size:1.1rem;font-weight:700;">🔄 不分组 · 直接随机循环赛</span>
+          <div style="color:#94a3b8;font-size:0.85rem;margin-top:6px;margin-left:28px;">所有队伍直接进入瑞士制循环赛（原有功能不变）</div>
+        </label>
+
+        <!-- 选项2 -->
+        <label style="display:block;cursor:pointer;padding:16px;border-radius:10px;border:2px solid rgba(251,191,36,0.3);margin-bottom:12px;background:rgba(251,191,36,0.05);" onclick="selectMode(2)">
+          <input type="radio" name="formatMode" id="mode2" value="2" style="width:18px;height:18px;vertical-align:middle;margin-right:10px;accent-color:#fbbf24;">
+          <span style="font-size:1.1rem;font-weight:700;color:#fbbf24;">🏆 分小组赛</span>
+          <div style="color:#94a3b8;font-size:0.85rem;margin-top:6px;margin-left:28px;">先小组循环赛，各组前几名再参加决赛循环赛</div>
+        </label>
+
+        <!-- 分小组赛配置（默认隐藏） -->
+        <div id="groupConfig" style="display:none;padding:16px;border-radius:10px;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);margin-bottom:12px;">
+          <div style="display:flex;gap:16px;margin-bottom:12px;">
+            <div style="flex:1;">
+              <label style="font-size:0.85rem;color:#94a3b8;display:block;margin-bottom:4px;">分几组？</label>
+              <input type="number" id="num_groups" min="2" max="8" value="2" oninput="validateGroups()"
+                style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#f1f5f9;font-size:1rem;">
             </div>
-            <div class="col-6">
-              <label class="small text-white-50 mb-1">{T('每组出线名额','Advance per Group')}</label>
-              <input type="number" name="advance_per_group" id="adv_pg" class="form-control bg-secondary text-white border-0" min="1" max="6" value="2" required oninput="validateGroups()">
+            <div style="flex:1;">
+              <label style="font-size:0.85rem;color:#94a3b8;display:block;margin-bottom:4px;">每组出线名额</label>
+              <input type="number" id="adv_pg" min="1" max="6" value="2" oninput="validateGroups()"
+                style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#f1f5f9;font-size:1rem;">
             </div>
           </div>
-          <div id="groupValidMsg" class="alert py-2 small mb-3" style="display:none;"></div>
-          <small class="text-white-50 d-block mb-3">{T('当前参赛队数','Current Teams')}: <strong class="text-info">{len(teams)}</strong></small>
-          <button type="submit" id="groupSubmitBtn" class="btn btn-warning w-100 py-3 fw-bold fs-5" disabled>✅ {T('确认分组并生成首轮','Confirm & Generate Round 1')}</button>
-        </form>
+          <div id="groupValidMsg" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.85rem;margin-bottom:8px;"></div>
+        </div>
+
+        <!-- 确认按钮 -->
+        <button id="confirmBtn" onclick="doConfirm()" disabled
+          style="width:100%;padding:14px;border-radius:10px;border:none;background:#475569;color:#94a3b8;font-size:1.1rem;font-weight:700;cursor:not-allowed;margin-top:4px;">
+          请先选择赛制
+        </button>
       </div>
     </div>
   </div>
 </div>
+
 <script>
 var totalTeams={len(teams)};
+var selectedMode=0;
+
+function selectMode(m){{
+  selectedMode=m;
+  document.getElementById('mode1').checked=(m===1);
+  document.getElementById('mode2').checked=(m===2);
+  var l1=document.getElementById('mode1').parentElement;
+  var l2=document.getElementById('mode2').parentElement;
+  l1.style.borderColor=m===1?'#06b6d4':'rgba(6,182,212,0.3)';
+  l1.style.background=m===1?'rgba(6,182,212,0.12)':'rgba(6,182,212,0.05)';
+  l2.style.borderColor=m===2?'#fbbf24':'rgba(251,191,36,0.3)';
+  l2.style.background=m===2?'rgba(251,191,36,0.12)':'rgba(251,191,36,0.05)';
+  document.getElementById('groupConfig').style.display=m===2?'block':'none';
+  if(m===1){{
+    var btn=document.getElementById('confirmBtn');
+    btn.disabled=false;btn.style.background='linear-gradient(135deg,#0ea5e9,#06b6d4)';
+    btn.style.color='#fff';btn.style.cursor='pointer';btn.textContent='✅ 确认 · 不分组循环赛';
+  }} else {{
+    validateGroups();
+  }}
+}}
+
 function validateGroups(){{
   var g=parseInt(document.getElementById('num_groups').value)||0;
   var a=parseInt(document.getElementById('adv_pg').value)||0;
   var msg=document.getElementById('groupValidMsg');
-  var btn=document.getElementById('groupSubmitBtn');
+  var btn=document.getElementById('confirmBtn');
   msg.style.display='block';
-  if(g<2){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent='至少需要分2组';btn.disabled=true;return;}}
+  if(g<2){{msg.style.background='rgba(239,68,68,0.15)';msg.style.color='#fca5a5';msg.textContent='❌ 至少需要分2组';btn.disabled=true;btn.style.background='#475569';btn.style.color='#94a3b8';btn.style.cursor='not-allowed';btn.textContent='配置有误，无法提交';return;}}
   var maxG=Math.floor(totalTeams/3);
-  if(g>maxG){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent=totalTeams+'支队最多可分'+maxG+'组（每组至少3支队）';btn.disabled=true;return;}}
+  if(g>maxG){{msg.style.background='rgba(239,68,68,0.15)';msg.style.color='#fca5a5';msg.textContent='❌ '+totalTeams+'支队最多分'+maxG+'组（每组至少3队）';btn.disabled=true;btn.style.background='#475569';btn.style.color='#94a3b8';btn.style.cursor='not-allowed';btn.textContent='配置有误，无法提交';return;}}
   var minPer=Math.floor(totalTeams/g);
-  if(a>=minPer){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent='每组约'+minPer+'队，出线名额必须小于每组队数';btn.disabled=true;return;}}
-  if(a*g<2){{msg.className='alert alert-danger py-2 small mb-3';msg.textContent='决赛至少需要2支队';btn.disabled=true;return;}}
-  msg.className='alert alert-success py-2 small mb-3';
-  msg.textContent='✅ 配置合理：'+g+'组，每组出线'+a+'名，共'+(a*g)+'支队参加决赛';
-  btn.disabled=false;
+  if(a>=minPer){{msg.style.background='rgba(239,68,68,0.15)';msg.style.color='#fca5a5';msg.textContent='❌ 每组约'+minPer+'队，出线名额须小于每组队数';btn.disabled=true;btn.style.background='#475569';btn.style.color='#94a3b8';btn.style.cursor='not-allowed';btn.textContent='配置有误，无法提交';return;}}
+  if(a*g<2){{msg.style.background='rgba(239,68,68,0.15)';msg.style.color='#fca5a5';msg.textContent='❌ 决赛至少需要2支队';btn.disabled=true;btn.style.background='#475569';btn.style.color='#94a3b8';btn.style.cursor='not-allowed';btn.textContent='配置有误，无法提交';return;}}
+  msg.style.background='rgba(34,197,94,0.15)';msg.style.color='#86efac';
+  msg.textContent='✅ 配置合理：'+g+'组，每组出线'+a+'名，共'+(a*g)+'支队进决赛';
+  btn.disabled=false;btn.style.background='linear-gradient(135deg,#f59e0b,#fbbf24)';
+  btn.style.color='#000';btn.style.cursor='pointer';btn.textContent='✅ 确认 · 开始分组循环赛';
+}}
+
+function doConfirm(){{
+  if(selectedMode===1){{
+    window.location.href='/init_game';
+  }} else if(selectedMode===2){{
+    var g=document.getElementById('num_groups').value;
+    var a=document.getElementById('adv_pg').value;
+    var form=document.createElement('form');
+    form.method='POST';form.action='/init_game_group';
+    var f1=document.createElement('input');f1.type='hidden';f1.name='num_groups';f1.value=g;
+    var f2=document.createElement('input');f2.type='hidden';f2.name='advance_per_group';f2.value=a;
+    form.appendChild(f1);form.appendChild(f2);
+    document.body.appendChild(form);form.submit();
+  }}
 }}
 </script>"""
 
