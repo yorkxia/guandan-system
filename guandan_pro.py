@@ -947,12 +947,13 @@ def panorama():
     team_map = {team.id: team for team in Team.query.filter_by(tournament_id=t.id).all()}
 
     if conf.mode == 1 and conf.stage == 'group':
-        # ===== 小组赛全景：按组分块显示 =====
+        # ===== 小组赛全景：按组分块显示（以 team.group_id 为准，与积分榜一致）=====
         GROUP_COLORS = ['#60A5FA','#34D399','#FBBF24','#F87171','#A78BFA','#FB923C','#38BDF8','#4ADE80']
         groups_html = ""
         for g in range(1, conf.num_groups + 1):
             color = GROUP_COLORS[(g-1) % len(GROUP_COLORS)]
-            g_matches = [m for m in ms_all if (m.group_id or 0) == g]
+            g_team_ids = {tid for tid, tm in team_map.items() if (tm.group_id or 0) == g}
+            g_matches = [m for m in ms_all if m.team_a_id in g_team_ids or m.team_b_id in g_team_ids]
             g_cards = []
             for m in g_matches:
                 is_6p = bool(m.pos_p5 and m.pos_p6)
@@ -1022,11 +1023,15 @@ def panorama():
                 f'<div style="color:rgba(255,255,255,0.65);font-size:0.9rem;">{seats_str}</div>'
                 f'</div></div>'
             )
-        # 历史小组赛数据（按轮次→分组）
-        hist_matches = Match.query.filter_by(tournament_id=t.id).filter(Match.group_id != None).order_by(Match.round_no, Match.group_id, Match.table_no).all()
+        # 历史小组赛数据（按轮次→分组，以 team.group_id 为准）
+        hist_matches = Match.query.filter_by(tournament_id=t.id).order_by(Match.round_no, Match.table_no).all()
+        # 只保留小组赛阶段的对阵（通过 team.group_id 判断，group_id>0 说明是小组赛队伍）
         hist_rounds = {}
         for m in hist_matches:
-            hist_rounds.setdefault(m.round_no, {}).setdefault(m.group_id or 0, []).append(m)
+            ta = team_map.get(m.team_a_id)
+            if ta and (ta.group_id or 0) > 0:
+                grp = ta.group_id
+                hist_rounds.setdefault(m.round_no, {}).setdefault(grp, []).append(m)
         GROUP_COLORS_H = ['#60A5FA','#34D399','#FBBF24','#F87171','#A78BFA','#FB923C','#38BDF8','#4ADE80']
         hist_html = ""
         for rnd in sorted(hist_rounds.keys()):
