@@ -1029,11 +1029,102 @@ def matches():
         html = f'{timer_html}{stage_label}{groups_html}{modals_html}{next_btn}{end_group_modal}'
 
     elif conf.mode == 1 and conf.stage == 'finals':
-        # ===== 决赛循环赛 =====
-        cards_html, next_btn = generate_matches_html(t, conf, is_panorama=False)
+        # ===== 决赛：决赛小组框（当前对阵）+ 小组赛存档框 =====
+        ms = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).order_by(Match.table_no).all()
+        team_map = {tm.id: tm for tm in Team.query.filter_by(tournament_id=t.id).all()}
+        GROUP_COLORS = ['#60A5FA','#34D399','#FBBF24','#F87171','#A78BFA','#FB923C','#38BDF8','#4ADE80']
+        FC = '#FFD700'
+        all_done = bool(ms) and all(m.is_completed for m in ms)
+        finals_cards = []
+        finals_modals = ""
+        finals_rows = ""
+        for m in ms:
+            is_6p = bool(m.pos_p5 and m.pos_p6)
+            if is_6p:
+                sh = (f'<div class="seat-player pos-6-1">① {m.pos_north}</div>'
+                      f'<div class="seat-player pos-6-2">② {m.pos_p5}</div>'
+                      f'<div class="seat-player pos-6-3">③ {m.pos_east}</div>'
+                      f'<div class="seat-player pos-6-4">④ {m.pos_south}</div>'
+                      f'<div class="seat-player pos-6-5">⑤ {m.pos_p6}</div>'
+                      f'<div class="seat-player pos-6-6">⑥ {m.pos_west}</div>')
+                seats_str = (f'① {m.pos_north or "-"} &nbsp; ② {m.pos_p5 or "-"} &nbsp; '
+                             f'③ {m.pos_east or "-"} &nbsp; ④ {m.pos_south or "-"} &nbsp; '
+                             f'⑤ {m.pos_p6 or "-"} &nbsp; ⑥ {m.pos_west or "-"}')
+            else:
+                sh = (f'<div class="seat-player pos-4-n">[N] {m.pos_north}</div>'
+                      f'<div class="seat-player pos-4-e">[E] {m.pos_east}</div>'
+                      f'<div class="seat-player pos-4-s">[S] {m.pos_south}</div>'
+                      f'<div class="seat-player pos-4-w">[W] {m.pos_west}</div>')
+                seats_str = (f'北: {m.pos_north or "-"} &nbsp;&nbsp; 南: {m.pos_south or "-"} &nbsp;&nbsp; '
+                             f'东: {m.pos_east or "-"} &nbsp;&nbsp; 西: {m.pos_west or "-"}')
+            click = f'data-bs-toggle="modal" data-bs-target="#m{m.id}"' if not m.is_completed else ''
+            finals_cards.append(
+                f'<div class="col-md-4 mb-3">'
+                f'<div class="glass-card p-3 shadow-sm" style="background:rgba(45,55,72,0.4);border-top:3px solid {FC};">'
+                f'<div class="seat-wrapper">{sh}'
+                f'<div class="table-circle {"table-red" if m.is_completed else "table-blue"}" {click}>T-{m.table_no}</div>'
+                f'</div><div class="mt-3 text-center bg-black bg-opacity-25 py-2 rounded">'
+                f'<span class="badge bg-primary px-3">{m.team_a_name}</span> VS '
+                f'<span class="badge bg-secondary px-3">{m.team_b_name}</span></div></div></div>'
+            )
+            finals_modals += (
+                f'<div class="modal fade" id="m{m.id}"><div class="modal-dialog modal-dialog-centered">'
+                f'<div class="modal-content bg-dark border-info text-white shadow-lg">'
+                f'<form action="/save/{m.id}" method="post"><div class="modal-body p-5 text-center">'
+                f'<h4 class="mb-4 text-info fw-bold">{T("第","Table")} {m.table_no} {T("桌成绩","Score")}</h4>'
+                f'<div class="row align-items-center mb-4">'
+                f'<div class="col-5"><label class="small mb-3 d-block text-white-50">{m.team_a_name}</label>'
+                f'<input name="sa" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required autofocus></div>'
+                f'<div class="col-2 fs-2 text-info">:</div>'
+                f'<div class="col-5"><label class="small mb-3 d-block text-white-50">{m.team_b_name}</label>'
+                f'<input name="sb" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required></div></div></div>'
+                f'<div class="modal-footer border-0 p-4">'
+                f'<button class="btn btn-info w-100 py-3 fw-bold fs-5 shadow">{T("提交成绩","Submit")}</button>'
+                f'</div></form></div></div></div>'
+            )
+            finals_rows += (
+                f'<div style="display:grid;grid-template-columns:75px 1fr;gap:10px;padding:10px 0;'
+                f'border-bottom:1px solid rgba(255,215,0,0.15);align-items:center;">'
+                f'<div style="color:{FC};font-weight:900;font-size:1.15rem;text-align:center;line-height:1.3;">'
+                f'（{m.table_no}）<br><span style="font-size:0.78rem;">号桌</span></div>'
+                f'<div><div style="font-size:0.98rem;margin-bottom:3px;">'
+                f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                f'<span style="color:rgba(255,255,255,0.35);margin:0 6px;">vs</span>'
+                f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span></div>'
+                f'<div style="color:rgba(255,255,255,0.55);font-size:0.85rem;">{seats_str}</div>'
+                f'</div></div>'
+            )
+        finals_box = (
+            f'<div class="mb-4" style="border:2px solid {FC};border-radius:12px;overflow:hidden;">'
+            f'<div style="background:rgba(255,215,0,0.15);padding:12px 20px;color:{FC};font-weight:900;font-size:1.2rem;">'
+            f'🏆 决赛小组 · 第{conf.current_round}轮</div>'
+            f'<div class="p-3"><div class="row">{"".join(finals_cards)}</div>'
+            f'<div style="padding:0 8px;margin-top:8px;">{finals_rows}</div></div></div>'
+        )
+        # 小组赛存档框（各原始分组展示）
+        group_archive_html = '<div class="mt-2 mb-2"><small class="text-white-50 d-block mb-2">📋 小组赛存档</small>'
+        for g in range(1, conf.num_groups + 1):
+            color = GROUP_COLORS[(g - 1) % len(GROUP_COLORS)]
+            g_teams = sorted([tm for tm in team_map.values() if (tm.group_id or 0) == g], key=lambda x: x.name)
+            g_items = "，".join([
+                f'<span style="color:{"#FFD700" if tm.is_finalist else "rgba(255,255,255,0.65)"};">'
+                f'{tm.name}{"&nbsp;✅" if tm.is_finalist else ""}</span>'
+                for tm in g_teams
+            ])
+            group_archive_html += (
+                f'<div class="mb-2" style="border:1px solid {color};border-radius:10px;overflow:hidden;">'
+                f'<div style="background:{color}22;padding:8px 16px;color:{color};font-weight:800;font-size:0.95rem;">'
+                f'第{g}组 · Group {g}</div>'
+                f'<div class="px-3 py-2" style="font-size:0.92rem;">{g_items}</div></div>'
+            )
+        group_archive_html += '</div>'
+        if all_done:
+            next_btn = f'<div class="text-center mt-4"><a href="/next_r" class="btn btn-warning btn-lg px-5 py-3 fw-bold rounded-pill shadow-lg text-dark fs-4">🏁 {T("下一轮编排","Generate Next Round")}</a></div>'
+        else:
+            next_btn = ""
         finals_label = (f'<div style="text-align:center;color:#FFD700;font-size:1rem;font-weight:700;'
                         f'margin:6px 0 16px;letter-spacing:2px;">🏆 决赛循环赛 · 第{conf.current_round}轮</div>')
-        html = f'{timer_html}{finals_label}<div class="row">{cards_html}</div>{next_btn}'
+        html = f'{timer_html}{finals_label}{finals_box}{group_archive_html}{finals_modals}{next_btn}'
 
     else:
         # ===== 普通循环赛 =====
@@ -1341,16 +1432,39 @@ def leaderboard():
             f'<thead><tr><th>名次</th><th>队伍</th><th>决赛胜分</th><th>决赛级分</th><th>选手</th></tr></thead>'
             f'<tbody>{f_rows}</tbody></table></div></div>'
         )
-        # 各组成绩（小字）
+        # 各组成绩存档：从历史对阵记录中还原小组赛真实成绩
+        finalist_ids = {tm.id for tm in all_teams if tm.is_finalist}
+        all_completed = Match.query.filter_by(tournament_id=t.id, is_completed=True).all()
+        gs_win = {}; gs_round = {}
+        for m in all_completed:
+            # 小组赛对阵判断：match.group_id>0 或至少一方非决赛队
+            is_gs = (m.group_id and m.group_id > 0) or not (m.team_a_id in finalist_ids and m.team_b_id in finalist_ids)
+            if not is_gs: continue
+            for (my_id, my_s, op_s) in [(m.team_a_id, m.score_a, m.score_b), (m.team_b_id, m.score_b, m.score_a)]:
+                if my_s < 0: continue
+                gs_win.setdefault(my_id, 0); gs_round.setdefault(my_id, 0)
+                if my_s > op_s: gs_win[my_id] += 3
+                elif my_s == op_s: gs_win[my_id] += 1
+                gs_round[my_id] += my_s
         group_tables = '<div class="mt-4"><small class="text-white-50 d-block mb-2">📋 小组赛成绩存档：</small>'
         for g in range(1, conf.num_groups + 1):
             color = GROUP_COLORS[(g-1) % len(GROUP_COLORS)]
-            g_teams = [tm for tm in all_teams if (tm.group_id or 0) == g]
-            # 小组赛成绩已被决赛重置，仅显示名单
-            group_tables += (f'<div class="mb-2 p-2 rounded" style="background:rgba(255,255,255,0.03);border-left:3px solid {color};">'
-                             f'<span style="color:{color};font-weight:700;">第{g}组：</span>'
-                             + '，'.join([f'<span class="{"text-warning fw-bold" if tm.is_finalist else "text-white-50"}">{tm.name}{"✅" if tm.is_finalist else ""}</span>' for tm in g_teams])
-                             + '</div>')
+            g_teams = sorted([tm for tm in all_teams if (tm.group_id or 0) == g],
+                             key=lambda x: (gs_win.get(x.id, 0), gs_round.get(x.id, 0)), reverse=True)
+            g_rows_lb = "".join([
+                f'<tr><td class="text-info fw-bold">{"🏆 " if tm.is_finalist else ""}{tm.name}</td>'
+                f'<td class="text-warning">{gs_win.get(tm.id, 0)}</td>'
+                f'<td class="text-success">{gs_round.get(tm.id, 0)}</td>'
+                f'<td class="text-white-50 small">{tm.players}</td></tr>'
+                for tm in g_teams
+            ])
+            group_tables += (
+                f'<div class="mb-3" style="border:1px solid {color};border-radius:10px;overflow:hidden;">'
+                f'<div style="background:{color}22;padding:8px 16px;color:{color};font-weight:800;font-size:0.9rem;">第{g}组 · Group {g}</div>'
+                f'<div class="table-responsive"><table class="table table-dark table-sm text-center align-middle mb-0">'
+                f'<thead><tr><th>队伍</th><th>胜分</th><th>级分</th><th>选手</th></tr></thead>'
+                f'<tbody>{g_rows_lb}</tbody></table></div></div>'
+            )
         group_tables += '</div>'
         aw = finalists[0] if len(finalists)>0 else None
         as2 = finalists[1] if len(finalists)>1 else None
@@ -1421,42 +1535,85 @@ def info():
 def export_excel():
     t = get_active_t()
     if not t: return "No active tournament"
-    
-    teams = Team.query.filter_by(tournament_id=t.id).all()
-    teams.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
-    
-    export_data = []
-    for i, team in enumerate(teams):
-        row = {
-            "排名 (Rank)": i+1,
-            "队名 (Team)": team.name,
-            "选手 (Players)": team.players,
-            "总胜分 (Total Win)": team.current_score,
-            "总级分 (Total Round)": team.round_score
-        }
-        
-        matches = Match.query.filter(
-            (Match.team_a_id == team.id) | (Match.team_b_id == team.id), 
-            Match.tournament_id == t.id
-        ).order_by(Match.round_no).all()
-        
-        for m in matches:
-            if m.score_a != -1 and m.score_b != -1: 
-                is_a = (m.team_a_id == team.id)
-                my_score = m.score_a if is_a else m.score_b
-                op_score = m.score_b if is_a else m.score_a
-                
-                win_pt = 3 if my_score > op_score else (0 if my_score < op_score else 1)
-                row[f"第{m.round_no}轮 胜分 (R{m.round_no} Win)"] = win_pt
-                row[f"第{m.round_no}轮 级分 (R{m.round_no} Round)"] = my_score
-                
-        export_data.append(row)
-        
-    df = pd.DataFrame(export_data)
+    conf = get_config(t.id)
+    all_teams = Team.query.filter_by(tournament_id=t.id).all()
+    all_matches = Match.query.filter_by(tournament_id=t.id).order_by(Match.round_no).all()
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer: df.to_excel(writer, index=False)
+
+    if conf.mode == 1 and conf.stage == 'finals':
+        # ===== 决赛模式：小组赛成绩 + 决赛成绩 分两个 Sheet =====
+        finalist_ids = {tm.id for tm in all_teams if tm.is_finalist}
+        # 判断每场对阵归属
+        gs_matches = [m for m in all_matches if
+                      (m.group_id and m.group_id > 0) or
+                      not (m.team_a_id in finalist_ids and m.team_b_id in finalist_ids)]
+        finals_matches = [m for m in all_matches if m not in gs_matches]
+
+        # Sheet 1：小组赛成绩
+        gs_data = []
+        for g in range(1, conf.num_groups + 1):
+            g_teams = [tm for tm in all_teams if (tm.group_id or 0) == g]
+            for team in g_teams:
+                t_matches = [m for m in gs_matches if m.team_a_id == team.id or m.team_b_id == team.id]
+                win_s = rnd_s = 0
+                row = {"小组": f"第{g}组", "队名": team.name, "选手": team.players, "晋级决赛": "✅" if team.is_finalist else ""}
+                for m in t_matches:
+                    if m.score_a < 0: continue
+                    is_a = m.team_a_id == team.id
+                    my_s = m.score_a if is_a else m.score_b
+                    op_s = m.score_b if is_a else m.score_a
+                    wp = 3 if my_s > op_s else (1 if my_s == op_s else 0)
+                    win_s += wp; rnd_s += my_s
+                    row[f"第{m.round_no}轮 胜分"] = wp
+                    row[f"第{m.round_no}轮 级分"] = my_s
+                row["小组赛总胜分"] = win_s
+                row["小组赛总级分"] = rnd_s
+                gs_data.append(row)
+
+        # Sheet 2：决赛成绩
+        finalists = sorted([tm for tm in all_teams if tm.is_finalist],
+                           key=lambda x: (x.current_score, x.round_score), reverse=True)
+        finals_data = []
+        for i, team in enumerate(finalists):
+            row = {"名次": i+1, "队名": team.name, "选手": team.players,
+                   "决赛总胜分": team.current_score, "决赛总级分": team.round_score}
+            for m in finals_matches:
+                if m.team_a_id != team.id and m.team_b_id != team.id: continue
+                if m.score_a < 0: continue
+                is_a = m.team_a_id == team.id
+                my_s = m.score_a if is_a else m.score_b
+                op_s = m.score_b if is_a else m.score_a
+                wp = 3 if my_s > op_s else (1 if my_s == op_s else 0)
+                row[f"决赛第{m.round_no}轮 胜分"] = wp
+                row[f"决赛第{m.round_no}轮 级分"] = my_s
+            finals_data.append(row)
+
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            pd.DataFrame(gs_data).to_excel(writer, index=False, sheet_name="小组赛成绩")
+            pd.DataFrame(finals_data).to_excel(writer, index=False, sheet_name="决赛成绩")
+
+    else:
+        # ===== 普通/小组赛模式：单 Sheet =====
+        all_teams.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
+        export_data = []
+        for i, team in enumerate(all_teams):
+            row = {"排名": i+1, "队名": team.name, "选手": team.players,
+                   "总胜分": team.current_score, "总级分": team.round_score}
+            for m in all_matches:
+                if m.team_a_id != team.id and m.team_b_id != team.id: continue
+                if m.score_a < 0: continue
+                is_a = m.team_a_id == team.id
+                my_s = m.score_a if is_a else m.score_b
+                op_s = m.score_b if is_a else m.score_a
+                wp = 3 if my_s > op_s else (1 if my_s == op_s else 0)
+                row[f"第{m.round_no}轮 胜分"] = wp
+                row[f"第{m.round_no}轮 级分"] = my_s
+            export_data.append(row)
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name="成绩记录")
+
     output.seek(0)
-    log_act("Export Excel", "Downloaded full match records.", t.id)
+    log_act("Export Excel", f"Downloaded full records (mode={conf.mode} stage={conf.stage}).", t.id)
     return send_file(output, as_attachment=True, download_name=f"Guandan_Record_{t.name}.xlsx")
 
 @app.route('/logs')
