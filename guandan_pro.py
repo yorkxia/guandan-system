@@ -899,11 +899,109 @@ def matches():
     t = get_active_t()
     if not t: return redirect(url_for('setup'))
     conf = get_config(t.id)
-    cards_html, next_btn = generate_matches_html(t, conf, is_panorama=False)
 
-    # 小组赛结束弹出框
-    end_group_modal = ""
+    timer_html = (f'<div id="timer-box"><div class="small text-secondary text-center">{T("计时","Timer")}<br>'
+                  f'<input type="number" id="duration" class="bg-transparent text-info border-0 text-center fw-bold" style="width:55px; outline:none;" value="50"></div>'
+                  f'<div id="time-display">00:00</div>'
+                  f'<button onclick="startTimer()" class="btn btn-info px-4 fw-bold rounded-pill">{T("开始","Start")}</button>'
+                  f'<button id="pause-btn" onclick="togglePause()" class="btn btn-outline-warning px-4 fw-bold rounded-pill">{T("暂停","Pause")}</button></div>')
+
     if conf.mode == 1 and conf.stage == 'group':
+        # ===== 小组赛：按组分块显示（同积分榜模式）=====
+        ms = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).order_by(Match.table_no).all()
+        team_map = {tm.id: tm for tm in Team.query.filter_by(tournament_id=t.id).all()}
+        GROUP_COLORS = ['#60A5FA','#34D399','#FBBF24','#F87171','#A78BFA','#FB923C','#38BDF8','#4ADE80']
+        all_done = bool(ms) and all(m.is_completed for m in ms)
+        groups_html = ""
+        modals_html = ""
+        for g in range(1, conf.num_groups + 1):
+            color = GROUP_COLORS[(g - 1) % len(GROUP_COLORS)]
+            g_team_ids = {tid for tid, tm in team_map.items() if (tm.group_id or 0) == g}
+            g_matches = [m for m in ms if m.team_a_id in g_team_ids or m.team_b_id in g_team_ids]
+            g_cards = []
+            for m in g_matches:
+                is_6p = bool(m.pos_p5 and m.pos_p6)
+                if is_6p:
+                    sh = (f'<div class="seat-player pos-6-1">① {m.pos_north}</div>'
+                          f'<div class="seat-player pos-6-2">② {m.pos_p5}</div>'
+                          f'<div class="seat-player pos-6-3">③ {m.pos_east}</div>'
+                          f'<div class="seat-player pos-6-4">④ {m.pos_south}</div>'
+                          f'<div class="seat-player pos-6-5">⑤ {m.pos_p6}</div>'
+                          f'<div class="seat-player pos-6-6">⑥ {m.pos_west}</div>')
+                else:
+                    sh = (f'<div class="seat-player pos-4-n">[N] {m.pos_north}</div>'
+                          f'<div class="seat-player pos-4-e">[E] {m.pos_east}</div>'
+                          f'<div class="seat-player pos-4-s">[S] {m.pos_south}</div>'
+                          f'<div class="seat-player pos-4-w">[W] {m.pos_west}</div>')
+                click = f'data-bs-toggle="modal" data-bs-target="#m{m.id}"' if not m.is_completed else ''
+                g_cards.append(
+                    f'<div class="col-md-4 mb-3">'
+                    f'<div class="glass-card p-3 shadow-sm" style="background:rgba(45,55,72,0.4);border-top:3px solid {color};">'
+                    f'<div class="seat-wrapper">{sh}'
+                    f'<div class="table-circle {"table-red" if m.is_completed else "table-blue"}" {click}>T-{m.table_no}</div>'
+                    f'</div><div class="mt-3 text-center bg-black bg-opacity-25 py-2 rounded">'
+                    f'<span class="badge bg-primary px-3">{m.team_a_name}</span> VS '
+                    f'<span class="badge bg-secondary px-3">{m.team_b_name}</span></div></div></div>'
+                )
+                # 录分弹窗
+                modals_html += (
+                    f'<div class="modal fade" id="m{m.id}"><div class="modal-dialog modal-dialog-centered">'
+                    f'<div class="modal-content bg-dark border-info text-white shadow-lg">'
+                    f'<form action="/save/{m.id}" method="post"><div class="modal-body p-5 text-center">'
+                    f'<h4 class="mb-4 text-info fw-bold">{T("第","Table")} {m.table_no} {T("桌成绩","Score")}</h4>'
+                    f'<div class="row align-items-center mb-4">'
+                    f'<div class="col-5"><label class="small mb-3 d-block text-white-50">{m.team_a_name}</label>'
+                    f'<input name="sa" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required autofocus></div>'
+                    f'<div class="col-2 fs-2 text-info">:</div>'
+                    f'<div class="col-5"><label class="small mb-3 d-block text-white-50">{m.team_b_name}</label>'
+                    f'<input name="sb" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required></div></div></div>'
+                    f'<div class="modal-footer border-0 p-4">'
+                    f'<button class="btn btn-info w-100 py-3 fw-bold fs-5 shadow">{T("提交成绩","Submit")}</button>'
+                    f'</div></form></div></div></div>'
+                )
+            # 本组对阵信息（含座位）
+            g_rows = ""
+            for m in g_matches:
+                is_6p = bool(m.pos_p5 and m.pos_p6)
+                if is_6p:
+                    seats_str = (f'① {m.pos_north or "-"} &nbsp; ② {m.pos_p5 or "-"} &nbsp; '
+                                 f'③ {m.pos_east or "-"} &nbsp; ④ {m.pos_south or "-"} &nbsp; '
+                                 f'⑤ {m.pos_p6 or "-"} &nbsp; ⑥ {m.pos_west or "-"}')
+                else:
+                    seats_str = (f'北: {m.pos_north or "-"} &nbsp;&nbsp; 南: {m.pos_south or "-"} &nbsp;&nbsp; '
+                                 f'东: {m.pos_east or "-"} &nbsp;&nbsp; 西: {m.pos_west or "-"}')
+                g_rows += (
+                    f'<div style="display:grid;grid-template-columns:75px 1fr;gap:10px;padding:10px 0;'
+                    f'border-bottom:1px solid rgba(255,255,255,0.1);align-items:center;">'
+                    f'<div style="color:{color};font-weight:900;font-size:1.15rem;text-align:center;line-height:1.3;">'
+                    f'（{m.table_no}）<br><span style="font-size:0.78rem;">号桌</span></div>'
+                    f'<div><div style="font-size:0.98rem;margin-bottom:3px;">'
+                    f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                    f'<span style="color:rgba(255,255,255,0.35);margin:0 6px;">vs</span>'
+                    f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span></div>'
+                    f'<div style="color:rgba(255,255,255,0.55);font-size:0.85rem;">{seats_str}</div>'
+                    f'</div></div>'
+                )
+            groups_html += (
+                f'<div class="mb-4" style="border:2px solid {color};border-radius:12px;overflow:hidden;">'
+                f'<div style="background:{color}22;padding:12px 20px;color:{color};font-weight:900;font-size:1.2rem;">'
+                f'第{g}组 · Group {g}</div>'
+                f'<div class="p-3"><div class="row">{"".join(g_cards)}</div>'
+                f'<div style="padding:0 8px;margin-top:8px;">{g_rows}</div></div></div>'
+            )
+        if all_done:
+            next_btn = (
+                f'<div class="text-center mt-4 d-flex justify-content-center gap-3">'
+                f'<a href="/next_r" class="btn btn-warning btn-lg px-5 py-3 fw-bold rounded-pill shadow-lg text-dark fs-4">🏁 {T("下一轮编排","Generate Next Round")}</a>'
+                f'<button class="btn btn-danger btn-lg px-5 py-3 fw-bold rounded-pill shadow-lg fs-4" data-bs-toggle="modal" data-bs-target="#endGroupModal">🏆 {T("小组赛结束","End Group Stage")}</button>'
+                f'</div>'
+            )
+        else:
+            next_btn = ""
+        stage_label = (f'<div style="text-align:center;color:#FBBF24;font-size:1rem;font-weight:700;'
+                       f'margin:6px 0 16px;letter-spacing:2px;">🏟 第{conf.current_round}轮 小组赛 | '
+                       f'{conf.num_groups}组赛制 · 每组出线{conf.advance_per_group}名</div>')
+        # 小组赛结束弹出框
         qualifiers = get_group_qualifiers(t.id)
         q_rows = "".join([
             f'<tr><td class="text-warning fw-bold">第{q.group_id}组</td>'
@@ -928,13 +1026,20 @@ def matches():
             </form>
           </div>
         </div></div></div>"""
+        html = f'{timer_html}{stage_label}{groups_html}{modals_html}{next_btn}{end_group_modal}'
 
-    html = (f'<div id="timer-box"><div class="small text-secondary text-center">{T("计时","Timer")}<br>'
-            f'<input type="number" id="duration" class="bg-transparent text-info border-0 text-center fw-bold" style="width:55px; outline:none;" value="50"></div>'
-            f'<div id="time-display">00:00</div>'
-            f'<button onclick="startTimer()" class="btn btn-info px-4 fw-bold rounded-pill">{T("开始","Start")}</button>'
-            f'<button id="pause-btn" onclick="togglePause()" class="btn btn-outline-warning px-4 fw-bold rounded-pill">{T("暂停","Pause")}</button></div>'
-            f'<div class="row">{cards_html}</div>{next_btn}{end_group_modal}')
+    elif conf.mode == 1 and conf.stage == 'finals':
+        # ===== 决赛循环赛 =====
+        cards_html, next_btn = generate_matches_html(t, conf, is_panorama=False)
+        finals_label = (f'<div style="text-align:center;color:#FFD700;font-size:1rem;font-weight:700;'
+                        f'margin:6px 0 16px;letter-spacing:2px;">🏆 决赛循环赛 · 第{conf.current_round}轮</div>')
+        html = f'{timer_html}{finals_label}<div class="row">{cards_html}</div>{next_btn}'
+
+    else:
+        # ===== 普通循环赛 =====
+        cards_html, next_btn = generate_matches_html(t, conf, is_panorama=False)
+        html = f'{timer_html}<div class="row">{cards_html}</div>{next_btn}'
+
     return render_layout(html, "matches")
 
 @app.route('/panorama')
