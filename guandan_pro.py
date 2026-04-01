@@ -961,18 +961,30 @@ def panorama():
                 else:
                     seats_html = f'<div class="seat-player pos-4-n">[N] {m.pos_north}</div><div class="seat-player pos-4-e">[E] {m.pos_east}</div><div class="seat-player pos-4-s">[S] {m.pos_south}</div><div class="seat-player pos-4-w">[W] {m.pos_west}</div>'
                 g_cards.append(f'<div class="col-md-4 mb-4"><div class="glass-card p-3 shadow-sm" style="background:rgba(45,55,72,0.4);border-top:3px solid {color};"><div class="seat-wrapper">{seats_html}<div class="table-circle table-{"red" if m.is_completed else "blue"}">T-{m.table_no}</div></div><div class="mt-4 text-center bg-black bg-opacity-25 py-2 rounded"><span class="badge bg-primary px-3">{m.team_a_name}</span> VS <span class="badge bg-secondary px-3">{m.team_b_name}</span></div></div></div>')
-            # 本组分组信息列表
+            # 本组对阵信息（含座位）
             g_rows = ""
             for m in g_matches:
-                ta = team_map.get(m.team_a_id); tb = team_map.get(m.team_b_id)
-                g_rows += (f'<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);">'
-                           f'<span style="color:{color};font-weight:900;margin-right:10px;">（{m.table_no}）号桌</span>'
-                           f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
-                           f'<span style="color:rgba(255,255,255,0.6);"> ({ta.players if ta else ""}) </span>'
-                           f'<span style="color:rgba(255,255,255,0.4);margin:0 8px;">vs</span>'
-                           f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span>'
-                           f'<span style="color:rgba(255,255,255,0.6);"> ({tb.players if tb else ""})</span>'
-                           f'</div>')
+                is_6p = bool(m.pos_p5 and m.pos_p6)
+                if is_6p:
+                    seats_str = (f'① {m.pos_north or "-"} &nbsp;&nbsp; ② {m.pos_p5 or "-"} &nbsp;&nbsp; '
+                                 f'③ {m.pos_east or "-"} &nbsp;&nbsp; ④ {m.pos_south or "-"} &nbsp;&nbsp; '
+                                 f'⑤ {m.pos_p6 or "-"} &nbsp;&nbsp; ⑥ {m.pos_west or "-"}')
+                else:
+                    seats_str = (f'北: {m.pos_north or "-"} &nbsp;&nbsp; 南: {m.pos_south or "-"} &nbsp;&nbsp; '
+                                 f'东: {m.pos_east or "-"} &nbsp;&nbsp; 西: {m.pos_west or "-"}')
+                g_rows += (
+                    f'<div style="display:grid;grid-template-columns:80px 1fr;gap:10px;padding:12px 0;'
+                    f'border-bottom:1px solid rgba(255,255,255,0.12);align-items:center;">'
+                    f'<div style="color:{color};font-weight:900;font-size:1.2rem;text-align:center;line-height:1.3;">'
+                    f'（{m.table_no}）<br><span style="font-size:0.8rem;font-weight:600;">号桌</span></div>'
+                    f'<div>'
+                    f'<div style="margin-bottom:5px;font-size:1rem;">'
+                    f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                    f'<span style="color:rgba(255,255,255,0.35);margin:0 8px;">vs</span>'
+                    f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span></div>'
+                    f'<div style="color:rgba(255,255,255,0.6);font-size:0.88rem;">{seats_str}</div>'
+                    f'</div></div>'
+                )
             groups_html += (
                 f'<div class="mb-5" style="border:2px solid {color};border-radius:16px;padding:24px 32px;background:rgba(0,0,0,0.2);">'
                 f'<div style="color:{color};font-size:1.6rem;font-weight:900;letter-spacing:3px;margin-bottom:18px;">第{g}组 · Group {g}</div>'
@@ -984,42 +996,128 @@ def panorama():
         stage_label = f'<div style="text-align:center;color:#FBBF24;font-size:1.1rem;font-weight:700;margin:10px 0 20px;letter-spacing:2px;">🏟 第{conf.current_round}轮 小组赛 | {conf.num_groups}组赛制 · 每组出线{conf.advance_per_group}名</div>'
         grouping_box = stage_label
     elif conf.mode == 1 and conf.stage == 'finals':
-        # ===== 决赛全景：普通布局 + 标记决赛 =====
+        # ===== 决赛全景：决赛循环赛置顶 + 历史小组赛数据在下 =====
         cards_html, _ = generate_matches_html(t, conf, is_panorama=True)
-        grouping_rows = ""
+        # 决赛对阵信息（含座位）
+        finals_rows = ""
         for m in ms_all:
-            ta = team_map.get(m.team_a_id); tb = team_map.get(m.team_b_id)
-            grouping_rows += (f'<div style="padding:10px 0;border-bottom:1px solid rgba(255,215,0,0.2);">'
-                              f'<span style="color:#FFD700;font-weight:900;font-size:1.25rem;margin-right:12px;">（{m.table_no}）号桌</span>'
-                              f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
-                              f'<span style="color:rgba(255,255,255,0.75);"> ({ta.players if ta else m.team_a_name}) </span>'
-                              f'<span style="color:rgba(255,255,255,0.5);margin:0 10px;">vs</span>'
-                              f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span>'
-                              f'<span style="color:rgba(255,255,255,0.75);"> ({tb.players if tb else m.team_b_name})</span>'
-                              f'</div>')
-        cards_section = f'<div class="container-fluid px-5 mt-4"><div class="row">{cards_html}</div></div>'
-        grouping_box = (f'<div class="container-fluid px-5 mt-5 mb-5">'
-                        f'<div style="background:rgba(255,215,0,0.08);border:2px solid #FFD700;border-radius:16px;padding:30px 40px;">'
-                        f'<div style="color:#FFD700;font-size:1.5rem;font-weight:900;letter-spacing:2px;margin-bottom:18px;">🏆 决赛 · Finals — 第{conf.current_round}轮</div>'
-                        f'<div style="font-size:1.15rem;line-height:1.8;">{grouping_rows}</div>'
-                        f'<div style="margin-top:28px;text-align:center;"><a href="/export_grouping" style="display:inline-block;background:linear-gradient(135deg,#F59E0B,#D97706);color:#fff;font-size:1.1rem;font-weight:800;padding:14px 48px;border-radius:50px;text-decoration:none;">📥 导出对阵信息</a></div>'
-                        f'</div></div>')
+            is_6p = bool(m.pos_p5 and m.pos_p6)
+            if is_6p:
+                seats_str = (f'① {m.pos_north or "-"} &nbsp;&nbsp; ② {m.pos_p5 or "-"} &nbsp;&nbsp; '
+                             f'③ {m.pos_east or "-"} &nbsp;&nbsp; ④ {m.pos_south or "-"} &nbsp;&nbsp; '
+                             f'⑤ {m.pos_p6 or "-"} &nbsp;&nbsp; ⑥ {m.pos_west or "-"}')
+            else:
+                seats_str = (f'北: {m.pos_north or "-"} &nbsp;&nbsp; 南: {m.pos_south or "-"} &nbsp;&nbsp; '
+                             f'东: {m.pos_east or "-"} &nbsp;&nbsp; 西: {m.pos_west or "-"}')
+            finals_rows += (
+                f'<div style="display:grid;grid-template-columns:80px 1fr;gap:10px;padding:14px 0;'
+                f'border-bottom:1px solid rgba(255,215,0,0.2);align-items:center;">'
+                f'<div style="color:#FFD700;font-weight:900;font-size:1.3rem;text-align:center;line-height:1.3;">'
+                f'（{m.table_no}）<br><span style="font-size:0.82rem;font-weight:600;">号桌</span></div>'
+                f'<div>'
+                f'<div style="margin-bottom:5px;font-size:1.05rem;">'
+                f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                f'<span style="color:rgba(255,255,255,0.35);margin:0 8px;">vs</span>'
+                f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span></div>'
+                f'<div style="color:rgba(255,255,255,0.65);font-size:0.9rem;">{seats_str}</div>'
+                f'</div></div>'
+            )
+        # 历史小组赛数据（按轮次→分组）
+        hist_matches = Match.query.filter_by(tournament_id=t.id).filter(Match.group_id != None).order_by(Match.round_no, Match.group_id, Match.table_no).all()
+        hist_rounds = {}
+        for m in hist_matches:
+            hist_rounds.setdefault(m.round_no, {}).setdefault(m.group_id or 0, []).append(m)
+        GROUP_COLORS_H = ['#60A5FA','#34D399','#FBBF24','#F87171','#A78BFA','#FB923C','#38BDF8','#4ADE80']
+        hist_html = ""
+        for rnd in sorted(hist_rounds.keys()):
+            round_groups_html = ""
+            for grp in sorted(hist_rounds[rnd].keys()):
+                hcolor = GROUP_COLORS_H[(grp - 1) % len(GROUP_COLORS_H)]
+                grp_rows = ""
+                for m in hist_rounds[rnd][grp]:
+                    is_6p = bool(m.pos_p5 and m.pos_p6)
+                    if is_6p:
+                        s_str = (f'① {m.pos_north or "-"} ② {m.pos_p5 or "-"} ③ {m.pos_east or "-"} '
+                                 f'④ {m.pos_south or "-"} ⑤ {m.pos_p6 or "-"} ⑥ {m.pos_west or "-"}')
+                    else:
+                        s_str = (f'北:{m.pos_north or "-"} 南:{m.pos_south or "-"} '
+                                 f'东:{m.pos_east or "-"} 西:{m.pos_west or "-"}')
+                    score_str = f'{m.score_a} : {m.score_b}' if m.is_completed else '-'
+                    grp_rows += (
+                        f'<div style="display:grid;grid-template-columns:70px 1fr 55px;gap:8px;padding:8px 0;'
+                        f'border-bottom:1px solid rgba(255,255,255,0.07);align-items:center;font-size:0.87rem;">'
+                        f'<div style="color:{hcolor};font-weight:800;text-align:center;">（{m.table_no}）号桌</div>'
+                        f'<div><span style="color:#7EC8E3;font-weight:600;">{m.team_a_name}</span>'
+                        f' <span style="color:rgba(255,255,255,0.3);">vs</span>'
+                        f' <span style="color:#F9A8D4;font-weight:600;">{m.team_b_name}</span>'
+                        f'<br><span style="color:rgba(255,255,255,0.45);">{s_str}</span></div>'
+                        f'<div style="color:#FFD700;font-weight:700;text-align:center;">{score_str}</div>'
+                        f'</div>'
+                    )
+                round_groups_html += (
+                    f'<div style="margin-bottom:14px;">'
+                    f'<div style="color:{hcolor};font-weight:800;font-size:0.93rem;margin-bottom:6px;">第{grp}组</div>'
+                    f'{grp_rows}</div>'
+                )
+            hist_html += (
+                f'<div style="margin-bottom:18px;padding:16px 20px;border:1px solid rgba(255,255,255,0.1);'
+                f'border-radius:12px;background:rgba(0,0,0,0.15);">'
+                f'<div style="color:rgba(255,255,255,0.5);font-size:0.93rem;font-weight:700;'
+                f'margin-bottom:12px;letter-spacing:1px;">小组赛 第{rnd}轮</div>'
+                f'{round_groups_html}</div>'
+            )
+        cards_section = (
+            f'<div class="container-fluid px-5 mt-2">'
+            f'<div style="background:rgba(255,215,0,0.06);border:2px solid #FFD700;'
+            f'border-radius:16px;padding:20px 32px 10px;margin-bottom:20px;">'
+            f'<div style="color:#FFD700;font-size:1.6rem;font-weight:900;letter-spacing:3px;margin-bottom:16px;">'
+            f'🏆 决赛循环赛 · 第{conf.current_round}轮</div>'
+            f'<div class="row">{cards_html}</div>'
+            f'</div></div>'
+        )
+        grouping_box = (
+            f'<div class="container-fluid px-5 mb-4">'
+            f'<div style="background:rgba(255,215,0,0.08);border:2px solid #FFD700;border-radius:16px;padding:24px 36px;">'
+            f'<div style="color:#FFD700;font-size:1.3rem;font-weight:900;letter-spacing:2px;margin-bottom:16px;">'
+            f'🏆 决赛循环赛 — 第{conf.current_round}轮 对阵详情</div>'
+            f'<div>{finals_rows}</div>'
+            f'<div style="margin-top:20px;text-align:center;">'
+            f'<a href="/export_grouping" style="display:inline-block;background:linear-gradient(135deg,#F59E0B,#D97706);'
+            f'color:#fff;font-size:1rem;font-weight:800;padding:12px 40px;border-radius:50px;text-decoration:none;">📥 导出对阵信息</a>'
+            f'</div></div></div>'
+            + (f'<div class="container-fluid px-5 mb-5">'
+               f'<div style="border:1px solid rgba(255,255,255,0.15);border-radius:16px;'
+               f'padding:24px 36px;background:rgba(0,0,0,0.2);">'
+               f'<div style="color:rgba(255,255,255,0.45);font-size:1.1rem;font-weight:700;'
+               f'letter-spacing:2px;margin-bottom:18px;">📁 小组赛历史数据</div>'
+               f'{hist_html}</div></div>' if hist_html else '')
+        )
     else:
         # ===== 普通循环赛全景：原有逻辑 =====
         cards_html, _ = generate_matches_html(t, conf, is_panorama=True)
         grouping_rows = ""
         for m in ms_all:
-            ta = team_map.get(m.team_a_id); tb = team_map.get(m.team_b_id)
-            ta_players = ta.players if ta else m.team_a_name
-            tb_players = tb.players if tb else m.team_b_name
-            grouping_rows += (f'<div style="padding:10px 0;border-bottom:1px solid rgba(255,215,0,0.2);">'
-                              f'<span style="color:#FFD700;font-weight:900;font-size:1.25rem;margin-right:12px;">（{m.table_no}）号桌</span>'
-                              f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
-                              f'<span style="color:rgba(255,255,255,0.75);font-size:1rem;">（{ta_players}）</span>'
-                              f'<span style="color:rgba(255,255,255,0.5);margin:0 10px;">vs</span>'
-                              f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span>'
-                              f'<span style="color:rgba(255,255,255,0.75);font-size:1rem;">（{tb_players}）</span>'
-                              f'</div>')
+            is_6p = bool(m.pos_p5 and m.pos_p6)
+            if is_6p:
+                seats_str = (f'① {m.pos_north or "-"} &nbsp;&nbsp; ② {m.pos_p5 or "-"} &nbsp;&nbsp; '
+                             f'③ {m.pos_east or "-"} &nbsp;&nbsp; ④ {m.pos_south or "-"} &nbsp;&nbsp; '
+                             f'⑤ {m.pos_p6 or "-"} &nbsp;&nbsp; ⑥ {m.pos_west or "-"}')
+            else:
+                seats_str = (f'北: {m.pos_north or "-"} &nbsp;&nbsp; 南: {m.pos_south or "-"} &nbsp;&nbsp; '
+                             f'东: {m.pos_east or "-"} &nbsp;&nbsp; 西: {m.pos_west or "-"}')
+            grouping_rows += (
+                f'<div style="display:grid;grid-template-columns:80px 1fr;gap:10px;padding:14px 0;'
+                f'border-bottom:1px solid rgba(255,215,0,0.2);align-items:center;">'
+                f'<div style="color:#FFD700;font-weight:900;font-size:1.3rem;text-align:center;line-height:1.3;">'
+                f'（{m.table_no}）<br><span style="font-size:0.82rem;font-weight:600;">号桌</span></div>'
+                f'<div>'
+                f'<div style="margin-bottom:5px;font-size:1.05rem;">'
+                f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                f'<span style="color:rgba(255,255,255,0.35);margin:0 8px;">vs</span>'
+                f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span></div>'
+                f'<div style="color:rgba(255,255,255,0.65);font-size:0.9rem;">{seats_str}</div>'
+                f'</div></div>'
+            )
         cards_section = f'<div class="container-fluid px-5 mt-4"><div class="row">{cards_html}</div></div>'
         grouping_box = (f'<div class="container-fluid px-5 mt-5 mb-5">'
                         f'<div style="background:rgba(255,215,0,0.08);border:2px solid #FFD700;border-radius:16px;padding:30px 40px;box-shadow:0 0 30px rgba(255,215,0,0.15);">'
