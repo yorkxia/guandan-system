@@ -1029,11 +1029,16 @@ def matches():
         html = f'{timer_html}{stage_label}{groups_html}{modals_html}{next_btn}{end_group_modal}'
 
     elif conf.mode == 1 and conf.stage == 'finals':
-        # ===== 决赛：决赛小组框（当前对阵）+ 小组赛存档框 =====
-        ms = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).order_by(Match.table_no).all()
+        # ===== 决赛：仅决赛队对阵框在上，小组赛完整存档在下 =====
         team_map = {tm.id: tm for tm in Team.query.filter_by(tournament_id=t.id).all()}
+        finalist_ids = {tid for tid, tm in team_map.items() if tm.is_finalist}
         GROUP_COLORS = ['#60A5FA','#34D399','#FBBF24','#F87171','#A78BFA','#FB923C','#38BDF8','#4ADE80']
         FC = '#FFD700'
+
+        # 只取当前轮次里两队均为决赛队的对阵（避免 round_no 与小组赛冲突）
+        ms_all_cur = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).order_by(Match.table_no).all()
+        ms = [m for m in ms_all_cur if m.team_a_id in finalist_ids and m.team_b_id in finalist_ids]
+
         all_done = bool(ms) and all(m.is_completed for m in ms)
         finals_cards = []
         finals_modals = ""
@@ -1101,30 +1106,69 @@ def matches():
             f'<div class="p-3"><div class="row">{"".join(finals_cards)}</div>'
             f'<div style="padding:0 8px;margin-top:8px;">{finals_rows}</div></div></div>'
         )
-        # 小组赛存档框（各原始分组展示）
-        group_archive_html = '<div class="mt-2 mb-2"><small class="text-white-50 d-block mb-2">📋 小组赛存档</small>'
+
+        # 小组赛完整存档：每组一个彩色框，框内按轮次列出对阵（赛桌、队伍、座位、比分）
+        all_hist = Match.query.filter_by(tournament_id=t.id).order_by(Match.round_no, Match.table_no).all()
+        # 小组赛对阵 = match.group_id>0 OR 至少一方不是决赛队
+        gs_by_group = {}  # group_id -> round_no -> [matches]
+        for m in all_hist:
+            is_gs = (m.group_id and m.group_id > 0) or not (m.team_a_id in finalist_ids and m.team_b_id in finalist_ids)
+            if not is_gs:
+                continue
+            ta = team_map.get(m.team_a_id)
+            grp = (ta.group_id or 0) if ta else 0
+            if grp > 0:
+                gs_by_group.setdefault(grp, {}).setdefault(m.round_no, []).append(m)
+
+        gs_archive_html = '<div class="mt-3"><small class="text-white-50 d-block mb-2">📋 小组赛存档</small>'
         for g in range(1, conf.num_groups + 1):
             color = GROUP_COLORS[(g - 1) % len(GROUP_COLORS)]
-            g_teams = sorted([tm for tm in team_map.values() if (tm.group_id or 0) == g], key=lambda x: x.name)
-            g_items = "，".join([
-                f'<span style="color:{"#FFD700" if tm.is_finalist else "rgba(255,255,255,0.65)"};">'
-                f'{tm.name}{"&nbsp;✅" if tm.is_finalist else ""}</span>'
-                for tm in g_teams
-            ])
-            group_archive_html += (
-                f'<div class="mb-2" style="border:1px solid {color};border-radius:10px;overflow:hidden;">'
-                f'<div style="background:{color}22;padding:8px 16px;color:{color};font-weight:800;font-size:0.95rem;">'
+            rounds_data = gs_by_group.get(g, {})
+            rounds_html = ""
+            for rnd in sorted(rounds_data.keys()):
+                rnd_rows = ""
+                for m in rounds_data[rnd]:
+                    is_6p = bool(m.pos_p5 and m.pos_p6)
+                    if is_6p:
+                        s_str = (f'① {m.pos_north or "-"} ② {m.pos_p5 or "-"} '
+                                 f'③ {m.pos_east or "-"} ④ {m.pos_south or "-"} '
+                                 f'⑤ {m.pos_p6 or "-"} ⑥ {m.pos_west or "-"}')
+                    else:
+                        s_str = (f'北:{m.pos_north or "-"} 南:{m.pos_south or "-"} '
+                                 f'东:{m.pos_east or "-"} 西:{m.pos_west or "-"}')
+                    score_str = f'{m.score_a} : {m.score_b}' if m.is_completed and m.score_a >= 0 else '-'
+                    rnd_rows += (
+                        f'<div style="display:grid;grid-template-columns:70px 1fr 60px;gap:8px;padding:8px 0;'
+                        f'border-bottom:1px solid rgba(255,255,255,0.07);font-size:0.87rem;align-items:center;">'
+                        f'<div style="color:{color};font-weight:800;text-align:center;">（{m.table_no}）号桌</div>'
+                        f'<div><span style="color:#7EC8E3;font-weight:600;">{m.team_a_name}</span>'
+                        f' <span style="color:rgba(255,255,255,0.3);">vs</span>'
+                        f' <span style="color:#F9A8D4;font-weight:600;">{m.team_b_name}</span>'
+                        f'<br><span style="color:rgba(255,255,255,0.42);font-size:0.82rem;">{s_str}</span></div>'
+                        f'<div style="color:#FFD700;font-weight:700;text-align:center;">{score_str}</div>'
+                        f'</div>'
+                    )
+                rounds_html += (
+                    f'<div style="margin-bottom:10px;">'
+                    f'<div style="color:rgba(255,255,255,0.45);font-size:0.8rem;font-weight:700;'
+                    f'margin-bottom:4px;letter-spacing:1px;">第{rnd}轮</div>'
+                    f'{rnd_rows}</div>'
+                )
+            gs_archive_html += (
+                f'<div class="mb-3" style="border:2px solid {color};border-radius:12px;overflow:hidden;">'
+                f'<div style="background:{color}22;padding:10px 18px;color:{color};font-weight:900;font-size:1.1rem;">'
                 f'第{g}组 · Group {g}</div>'
-                f'<div class="px-3 py-2" style="font-size:0.92rem;">{g_items}</div></div>'
+                f'<div class="p-3">{rounds_html or "<div style=\'color:rgba(255,255,255,0.35);font-size:0.88rem;\'>暂无数据</div>"}</div></div>'
             )
-        group_archive_html += '</div>'
+        gs_archive_html += '</div>'
+
         if all_done:
             next_btn = f'<div class="text-center mt-4"><a href="/next_r" class="btn btn-warning btn-lg px-5 py-3 fw-bold rounded-pill shadow-lg text-dark fs-4">🏁 {T("下一轮编排","Generate Next Round")}</a></div>'
         else:
             next_btn = ""
         finals_label = (f'<div style="text-align:center;color:#FFD700;font-size:1rem;font-weight:700;'
                         f'margin:6px 0 16px;letter-spacing:2px;">🏆 决赛循环赛 · 第{conf.current_round}轮</div>')
-        html = f'{timer_html}{finals_label}{finals_box}{group_archive_html}{finals_modals}{next_btn}'
+        html = f'{timer_html}{finals_label}{finals_box}{gs_archive_html}{finals_modals}{next_btn}'
 
     else:
         # ===== 普通循环赛 =====
