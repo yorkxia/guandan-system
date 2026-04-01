@@ -683,12 +683,28 @@ function doConfirm(){{
 }}
 </script>"""
 
+    if curr_user == 'admin':
+        archive_rows = "".join([
+            f"<div class='list-group-item bg-transparent text-white border-secondary d-flex justify-content-between align-items-center py-2'>"
+            f"<a href='/view_history/{h.id}' class='text-white text-decoration-none flex-grow-1 me-2'>"
+            f"{'<span class=\"badge bg-info me-1\">Active</span>' if h.is_active else '📁 '}{h.name} ({h.owner or 'admin'})</a>"
+            f"<form action='/delete_tournament/{h.id}' method='post' class='flex-shrink-0' onsubmit=\"return confirm('确认删除赛事「{h.name}」？\\n此操作不可撤销，所有数据将永久删除！')\">"
+            f"<button type='submit' class='btn btn-danger btn-sm py-0 px-2' style='font-size:11px;'>🗑 {T('删除','Delete')}</button></form></div>"
+            for h in history
+        ])
+    else:
+        archive_rows = "".join([
+            f"<a href='/view_history/{h.id}' class='list-group-item list-group-item-action bg-transparent text-white border-secondary'>"
+            f"{'<span class=\"badge bg-info\">Active</span>' if h.is_active else '📁'} {h.name} ({h.owner})</a>"
+            for h in history
+        ])
+
     return render_layout(
         f"""<div class="row">
           <div class="col-md-4">{excel_upload_html}{team_input_html}
             <div class="glass-card p-4 shadow">
               <h5>📅 {T('赛事存档','Tournament Archives')}</h5>
-              <div class="list-group mt-3 small mb-4">{"".join([f"<a href='/view_history/{h.id}' class='list-group-item list-group-item-action bg-transparent text-white border-secondary'>{'<span class=\"badge bg-info\">Active</span>' if h.is_active else '📁'} {h.name} ({h.owner})</a>" for h in history])}</div>
+              <div class="list-group mt-3 small mb-4">{archive_rows}</div>
               <div class="border-top border-secondary pt-3">
                 <h6 class="text-info small fw-bold mb-3">🆕 {T('启动新赛事','Create New Tournament')}</h6>
                 <form action="/create_new_tournament" method="post">
@@ -1314,6 +1330,21 @@ def view_history(tid):
         t = Tournament.query.filter_by(id=tid, owner=curr_user).first()
     if t: 
         t.is_active = True; db.session.commit(); log_act("Switch Active Tournament", f"Target: {t.name}")
+    return redirect(url_for('setup'))
+
+@app.route('/delete_tournament/<int:tid>', methods=['POST'])
+def delete_tournament(tid):
+    if session.get('username') != 'admin': abort(403)
+    t = Tournament.query.get_or_404(tid)
+    name = t.name
+    AuditLog.query.filter_by(tournament_id=tid).delete()
+    Match.query.filter_by(tournament_id=tid).delete()
+    Team.query.filter_by(tournament_id=tid).delete()
+    SystemConfig.query.filter_by(tournament_id=tid).delete()
+    TournamentInfo.query.filter_by(tournament_id=tid).delete()
+    db.session.delete(t)
+    db.session.commit()
+    log_act("Delete Tournament", f"Deleted tournament: {name}")
     return redirect(url_for('setup'))
 
 @app.route('/del_team/<int:tid>')
