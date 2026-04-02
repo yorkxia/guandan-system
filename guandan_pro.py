@@ -334,7 +334,7 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
     </style>
     <script>
         let timer; let timeLeft; let isPaused = false;
-        let audioCtx = null; let bgMusicNodes = []; let musicLoopTimer = null; let fiveMinAlertDone = false;
+        let fiveMinAlertDone = false; let bgAudio = null;
         function startTimer() {{
             let durEl = document.getElementById('duration');
             let mins;
@@ -383,9 +383,7 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
             }}
         }}
         function stopBgMusic() {{
-            if(musicLoopTimer) {{ clearTimeout(musicLoopTimer); musicLoopTimer = null; }}
-            bgMusicNodes.forEach(n => {{ try {{ n.stop(0); }} catch(e) {{}} }});
-            bgMusicNodes = [];
+            if(bgAudio) {{ bgAudio.pause(); bgAudio.currentTime = 0; bgAudio = null; }}
         }}
         function startFiveMinuteAlert() {{
             if('speechSynthesis' in window) {{
@@ -394,42 +392,11 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
                 u.lang = 'zh-CN'; u.rate = 0.88; u.pitch = 1.05; u.volume = 1.0;
                 window.speechSynthesis.speak(u);
             }}
-            startSaxMusic();
-        }}
-        function startSaxMusic() {{
             stopBgMusic();
-            if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if(audioCtx.state === 'suspended') audioCtx.resume();
-            playMelodyLoop();
-        }}
-        function playMelodyLoop() {{
-            if(timeLeft <= 0) return;
-            const notes = [392, 440, 523.25, 587.33, 523.25, 440, 392, 329.63, 392, 440, 523.25, 440];
-            const durs  = [0.25, 0.25, 0.4, 0.25, 0.25, 0.25, 0.25, 0.4, 0.25, 0.25, 0.5, 0.75];
-            let t = audioCtx.currentTime + 0.05;
-            let nodes = [];
-            notes.forEach((freq, i) => {{
-                const osc = audioCtx.createOscillator();
-                const filt = audioCtx.createBiquadFilter();
-                const gainNode = audioCtx.createGain();
-                osc.type = 'sawtooth';
-                osc.frequency.setValueAtTime(freq, t);
-                osc.detune.setValueAtTime(5, t);
-                filt.type = 'lowpass';
-                filt.frequency.setValueAtTime(1400, t);
-                filt.Q.setValueAtTime(3, t);
-                const d = durs[i];
-                gainNode.gain.setValueAtTime(0, t);
-                gainNode.gain.linearRampToValueAtTime(0.18, t + 0.04);
-                gainNode.gain.setValueAtTime(0.14, t + d * 0.7);
-                gainNode.gain.linearRampToValueAtTime(0, t + d);
-                osc.connect(filt); filt.connect(gainNode); gainNode.connect(audioCtx.destination);
-                osc.start(t); osc.stop(t + d);
-                nodes.push(osc); t += d;
-            }});
-            bgMusicNodes = nodes;
-            const totalMs = durs.reduce((a, b) => a + b, 0) * 1000;
-            musicLoopTimer = setTimeout(() => {{ bgMusicNodes = []; if(timeLeft > 0) playMelodyLoop(); }}, totalMs + 120);
+            bgAudio = new Audio('/static/Kenny G - Going home\u56de\u5bb6_\u7231\u7ed9\u7f51_aigei_com.mp3');
+            bgAudio.loop = true;
+            bgAudio.volume = 0.85;
+            bgAudio.play().catch(e => console.warn('Audio play failed:', e));
         }}
         function initPanoramaDisplay() {{
             let mins = parseInt(localStorage.getItem('guandan_timer_mins')) || 50;
