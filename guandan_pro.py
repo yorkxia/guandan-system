@@ -921,18 +921,21 @@ def matches():
             g_cards = []
             for m in g_matches:
                 is_6p = bool(m.pos_p5 and m.pos_p6)
+                _ta = team_map.get(m.team_a_id)
+                _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+                pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
                 if is_6p:
-                    sh = (f'<div class="seat-player pos-6-1">① {m.pos_north}</div>'
-                          f'<div class="seat-player pos-6-2">② {m.pos_p5}</div>'
-                          f'<div class="seat-player pos-6-3">③ {m.pos_east}</div>'
-                          f'<div class="seat-player pos-6-4">④ {m.pos_south}</div>'
-                          f'<div class="seat-player pos-6-5">⑤ {m.pos_p6}</div>'
-                          f'<div class="seat-player pos-6-6">⑥ {m.pos_west}</div>')
+                    sh = (f'<div class="seat-player pos-6-1" style="color:{pc(m.pos_north)}">① {m.pos_north}</div>'
+                          f'<div class="seat-player pos-6-2" style="color:{pc(m.pos_p5)}">② {m.pos_p5}</div>'
+                          f'<div class="seat-player pos-6-3" style="color:{pc(m.pos_east)}">③ {m.pos_east}</div>'
+                          f'<div class="seat-player pos-6-4" style="color:{pc(m.pos_south)}">④ {m.pos_south}</div>'
+                          f'<div class="seat-player pos-6-5" style="color:{pc(m.pos_p6)}">⑤ {m.pos_p6}</div>'
+                          f'<div class="seat-player pos-6-6" style="color:{pc(m.pos_west)}">⑥ {m.pos_west}</div>')
                 else:
-                    sh = (f'<div class="seat-player pos-4-n">[N] {m.pos_north}</div>'
-                          f'<div class="seat-player pos-4-e">[E] {m.pos_east}</div>'
-                          f'<div class="seat-player pos-4-s">[S] {m.pos_south}</div>'
-                          f'<div class="seat-player pos-4-w">[W] {m.pos_west}</div>')
+                    sh = (f'<div class="seat-player pos-4-n" style="color:{pc(m.pos_north)}">[N] {m.pos_north}</div>'
+                          f'<div class="seat-player pos-4-e" style="color:{pc(m.pos_east)}">[E] {m.pos_east}</div>'
+                          f'<div class="seat-player pos-4-s" style="color:{pc(m.pos_south)}">[S] {m.pos_south}</div>'
+                          f'<div class="seat-player pos-4-w" style="color:{pc(m.pos_west)}">[W] {m.pos_west}</div>')
                 click = f'data-bs-toggle="modal" data-bs-target="#m{m.id}"' if not m.is_completed else ''
                 g_cards.append(
                     f'<div class="col-md-4 mb-3">'
@@ -940,8 +943,9 @@ def matches():
                     f'<div class="seat-wrapper">{sh}'
                     f'<div class="table-circle {"table-red" if m.is_completed else "table-blue"}" {click}>T-{m.table_no}</div>'
                     f'</div><div class="mt-3 text-center bg-black bg-opacity-25 py-2 rounded">'
-                    f'<span class="badge bg-primary px-3">{m.team_a_name}</span> VS '
-                    f'<span class="badge bg-secondary px-3">{m.team_b_name}</span></div></div></div>'
+                    f'<span style="color:#60A5FA;font-weight:700;">{m.team_a_name}</span>'
+                    f' <span style="color:rgba(255,255,255,0.35);">VS</span> '
+                    f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span></div></div></div>'
                 )
                 # 录分弹窗
                 modals_html += (
@@ -963,23 +967,31 @@ def matches():
             g_rows = ""
             for m in g_matches:
                 is_6p = bool(m.pos_p5 and m.pos_p6)
+                _ta = team_map.get(m.team_a_id)
+                _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+                pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
                 if is_6p:
-                    seats_str = (f'① {m.pos_north or "-"} &nbsp; ② {m.pos_p5 or "-"} &nbsp; '
-                                 f'③ {m.pos_east or "-"} &nbsp; ④ {m.pos_south or "-"} &nbsp; '
-                                 f'⑤ {m.pos_p6 or "-"} &nbsp; ⑥ {m.pos_west or "-"}')
+                    seats_str = (f'① <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp; '
+                                 f'② <span style="color:{pc(m.pos_p5)}">{m.pos_p5 or "-"}</span> &nbsp; '
+                                 f'③ <span style="color:{pc(m.pos_east)}">{m.pos_east or "-"}</span> &nbsp; '
+                                 f'④ <span style="color:{pc(m.pos_south)}">{m.pos_south or "-"}</span> &nbsp; '
+                                 f'⑤ <span style="color:{pc(m.pos_p6)}">{m.pos_p6 or "-"}</span> &nbsp; '
+                                 f'⑥ <span style="color:{pc(m.pos_west)}">{m.pos_west or "-"}</span>')
                 else:
-                    seats_str = (f'北: {m.pos_north or "-"} &nbsp;&nbsp; 南: {m.pos_south or "-"} &nbsp;&nbsp; '
-                                 f'东: {m.pos_east or "-"} &nbsp;&nbsp; 西: {m.pos_west or "-"}')
+                    seats_str = (f'北: <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp;&nbsp; '
+                                 f'南: <span style="color:{pc(m.pos_south)}">{m.pos_south or "-"}</span> &nbsp;&nbsp; '
+                                 f'东: <span style="color:{pc(m.pos_east)}">{m.pos_east or "-"}</span> &nbsp;&nbsp; '
+                                 f'西: <span style="color:{pc(m.pos_west)}">{m.pos_west or "-"}</span>')
                 g_rows += (
                     f'<div style="display:grid;grid-template-columns:75px 1fr;gap:10px;padding:10px 0;'
                     f'border-bottom:1px solid rgba(255,255,255,0.1);align-items:center;">'
                     f'<div style="color:{color};font-weight:900;font-size:1.15rem;text-align:center;line-height:1.3;">'
                     f'（{m.table_no}）<br><span style="font-size:0.78rem;">号桌</span></div>'
                     f'<div><div style="font-size:0.98rem;margin-bottom:3px;">'
-                    f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                    f'<span style="color:#60A5FA;font-weight:700;">{m.team_a_name}</span>'
                     f'<span style="color:rgba(255,255,255,0.35);margin:0 6px;">vs</span>'
-                    f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span></div>'
-                    f'<div style="color:rgba(255,255,255,0.55);font-size:0.85rem;">{seats_str}</div>'
+                    f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span></div>'
+                    f'<div style="font-size:0.85rem;">{seats_str}</div>'
                     f'</div></div>'
                 )
             groups_html += (
@@ -1045,23 +1057,31 @@ def matches():
         finals_rows = ""
         for m in ms:
             is_6p = bool(m.pos_p5 and m.pos_p6)
+            _ta = team_map.get(m.team_a_id)
+            _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+            pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
             if is_6p:
-                sh = (f'<div class="seat-player pos-6-1">① {m.pos_north}</div>'
-                      f'<div class="seat-player pos-6-2">② {m.pos_p5}</div>'
-                      f'<div class="seat-player pos-6-3">③ {m.pos_east}</div>'
-                      f'<div class="seat-player pos-6-4">④ {m.pos_south}</div>'
-                      f'<div class="seat-player pos-6-5">⑤ {m.pos_p6}</div>'
-                      f'<div class="seat-player pos-6-6">⑥ {m.pos_west}</div>')
-                seats_str = (f'① {m.pos_north or "-"} &nbsp; ② {m.pos_p5 or "-"} &nbsp; '
-                             f'③ {m.pos_east or "-"} &nbsp; ④ {m.pos_south or "-"} &nbsp; '
-                             f'⑤ {m.pos_p6 or "-"} &nbsp; ⑥ {m.pos_west or "-"}')
+                sh = (f'<div class="seat-player pos-6-1" style="color:{pc(m.pos_north)}">① {m.pos_north}</div>'
+                      f'<div class="seat-player pos-6-2" style="color:{pc(m.pos_p5)}">② {m.pos_p5}</div>'
+                      f'<div class="seat-player pos-6-3" style="color:{pc(m.pos_east)}">③ {m.pos_east}</div>'
+                      f'<div class="seat-player pos-6-4" style="color:{pc(m.pos_south)}">④ {m.pos_south}</div>'
+                      f'<div class="seat-player pos-6-5" style="color:{pc(m.pos_p6)}">⑤ {m.pos_p6}</div>'
+                      f'<div class="seat-player pos-6-6" style="color:{pc(m.pos_west)}">⑥ {m.pos_west}</div>')
+                seats_str = (f'① <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp; '
+                             f'② <span style="color:{pc(m.pos_p5)}">{m.pos_p5 or "-"}</span> &nbsp; '
+                             f'③ <span style="color:{pc(m.pos_east)}">{m.pos_east or "-"}</span> &nbsp; '
+                             f'④ <span style="color:{pc(m.pos_south)}">{m.pos_south or "-"}</span> &nbsp; '
+                             f'⑤ <span style="color:{pc(m.pos_p6)}">{m.pos_p6 or "-"}</span> &nbsp; '
+                             f'⑥ <span style="color:{pc(m.pos_west)}">{m.pos_west or "-"}</span>')
             else:
-                sh = (f'<div class="seat-player pos-4-n">[N] {m.pos_north}</div>'
-                      f'<div class="seat-player pos-4-e">[E] {m.pos_east}</div>'
-                      f'<div class="seat-player pos-4-s">[S] {m.pos_south}</div>'
-                      f'<div class="seat-player pos-4-w">[W] {m.pos_west}</div>')
-                seats_str = (f'北: {m.pos_north or "-"} &nbsp;&nbsp; 南: {m.pos_south or "-"} &nbsp;&nbsp; '
-                             f'东: {m.pos_east or "-"} &nbsp;&nbsp; 西: {m.pos_west or "-"}')
+                sh = (f'<div class="seat-player pos-4-n" style="color:{pc(m.pos_north)}">[N] {m.pos_north}</div>'
+                      f'<div class="seat-player pos-4-e" style="color:{pc(m.pos_east)}">[E] {m.pos_east}</div>'
+                      f'<div class="seat-player pos-4-s" style="color:{pc(m.pos_south)}">[S] {m.pos_south}</div>'
+                      f'<div class="seat-player pos-4-w" style="color:{pc(m.pos_west)}">[W] {m.pos_west}</div>')
+                seats_str = (f'北: <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp;&nbsp; '
+                             f'南: <span style="color:{pc(m.pos_south)}">{m.pos_south or "-"}</span> &nbsp;&nbsp; '
+                             f'东: <span style="color:{pc(m.pos_east)}">{m.pos_east or "-"}</span> &nbsp;&nbsp; '
+                             f'西: <span style="color:{pc(m.pos_west)}">{m.pos_west or "-"}</span>')
             click = f'data-bs-toggle="modal" data-bs-target="#m{m.id}"' if not m.is_completed else ''
             finals_cards.append(
                 f'<div class="col-md-4 mb-3">'
@@ -1069,8 +1089,9 @@ def matches():
                 f'<div class="seat-wrapper">{sh}'
                 f'<div class="table-circle {"table-red" if m.is_completed else "table-blue"}" {click}>T-{m.table_no}</div>'
                 f'</div><div class="mt-3 text-center bg-black bg-opacity-25 py-2 rounded">'
-                f'<span class="badge bg-primary px-3">{m.team_a_name}</span> VS '
-                f'<span class="badge bg-secondary px-3">{m.team_b_name}</span></div></div></div>'
+                f'<span style="color:#60A5FA;font-weight:700;">{m.team_a_name}</span>'
+                f' <span style="color:rgba(255,255,255,0.35);">VS</span> '
+                f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span></div></div></div>'
             )
             finals_modals += (
                 f'<div class="modal fade" id="m{m.id}"><div class="modal-dialog modal-dialog-centered">'
@@ -1078,10 +1099,10 @@ def matches():
                 f'<form action="/save/{m.id}" method="post"><div class="modal-body p-5 text-center">'
                 f'<h4 class="mb-4 text-info fw-bold">{T("第","Table")} {m.table_no} {T("桌成绩","Score")}</h4>'
                 f'<div class="row align-items-center mb-4">'
-                f'<div class="col-5"><label class="small mb-3 d-block text-white-50">{m.team_a_name}</label>'
+                f'<div class="col-5"><label class="small mb-3 d-block" style="color:#60A5FA;">{m.team_a_name}</label>'
                 f'<input name="sa" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required autofocus></div>'
                 f'<div class="col-2 fs-2 text-info">:</div>'
-                f'<div class="col-5"><label class="small mb-3 d-block text-white-50">{m.team_b_name}</label>'
+                f'<div class="col-5"><label class="small mb-3 d-block" style="color:#FB923C;">{m.team_b_name}</label>'
                 f'<input name="sb" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required></div></div></div>'
                 f'<div class="modal-footer border-0 p-4">'
                 f'<button class="btn btn-info w-100 py-3 fw-bold fs-5 shadow">{T("提交成绩","Submit")}</button>'
@@ -1093,10 +1114,10 @@ def matches():
                 f'<div style="color:{FC};font-weight:900;font-size:1.15rem;text-align:center;line-height:1.3;">'
                 f'（{m.table_no}）<br><span style="font-size:0.78rem;">号桌</span></div>'
                 f'<div><div style="font-size:0.98rem;margin-bottom:3px;">'
-                f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                f'<span style="color:#60A5FA;font-weight:700;">{m.team_a_name}</span>'
                 f'<span style="color:rgba(255,255,255,0.35);margin:0 6px;">vs</span>'
-                f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span></div>'
-                f'<div style="color:rgba(255,255,255,0.55);font-size:0.85rem;">{seats_str}</div>'
+                f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span></div>'
+                f'<div style="font-size:0.85rem;">{seats_str}</div>'
                 f'</div></div>'
             )
         finals_box = (
@@ -1172,8 +1193,90 @@ def matches():
 
     else:
         # ===== 普通循环赛 =====
-        cards_html, next_btn = generate_matches_html(t, conf, is_panorama=False)
-        html = f'{timer_html}<div class="row">{cards_html}</div>{next_btn}'
+        ms = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).order_by(Match.table_no).all()
+        team_map = {tm.id: tm for tm in Team.query.filter_by(tournament_id=t.id).all()}
+        all_done = bool(ms) and all(m.is_completed for m in ms)
+        BOX_COLOR = '#60A5FA'
+        cards = []
+        modals = ""
+        info_rows = ""
+        for m in ms:
+            is_6p = bool(m.pos_p5 and m.pos_p6)
+            _ta = team_map.get(m.team_a_id)
+            _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+            pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
+            if is_6p:
+                sh = (f'<div class="seat-player pos-6-1" style="color:{pc(m.pos_north)}">① {m.pos_north}</div>'
+                      f'<div class="seat-player pos-6-2" style="color:{pc(m.pos_p5)}">② {m.pos_p5}</div>'
+                      f'<div class="seat-player pos-6-3" style="color:{pc(m.pos_east)}">③ {m.pos_east}</div>'
+                      f'<div class="seat-player pos-6-4" style="color:{pc(m.pos_south)}">④ {m.pos_south}</div>'
+                      f'<div class="seat-player pos-6-5" style="color:{pc(m.pos_p6)}">⑤ {m.pos_p6}</div>'
+                      f'<div class="seat-player pos-6-6" style="color:{pc(m.pos_west)}">⑥ {m.pos_west}</div>')
+                seats_str = (f'① <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp; '
+                             f'② <span style="color:{pc(m.pos_p5)}">{m.pos_p5 or "-"}</span> &nbsp; '
+                             f'③ <span style="color:{pc(m.pos_east)}">{m.pos_east or "-"}</span> &nbsp; '
+                             f'④ <span style="color:{pc(m.pos_south)}">{m.pos_south or "-"}</span> &nbsp; '
+                             f'⑤ <span style="color:{pc(m.pos_p6)}">{m.pos_p6 or "-"}</span> &nbsp; '
+                             f'⑥ <span style="color:{pc(m.pos_west)}">{m.pos_west or "-"}</span>')
+            else:
+                sh = (f'<div class="seat-player pos-4-n" style="color:{pc(m.pos_north)}">[N] {m.pos_north}</div>'
+                      f'<div class="seat-player pos-4-e" style="color:{pc(m.pos_east)}">[E] {m.pos_east}</div>'
+                      f'<div class="seat-player pos-4-s" style="color:{pc(m.pos_south)}">[S] {m.pos_south}</div>'
+                      f'<div class="seat-player pos-4-w" style="color:{pc(m.pos_west)}">[W] {m.pos_west}</div>')
+                seats_str = (f'北: <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp;&nbsp; '
+                             f'南: <span style="color:{pc(m.pos_south)}">{m.pos_south or "-"}</span> &nbsp;&nbsp; '
+                             f'东: <span style="color:{pc(m.pos_east)}">{m.pos_east or "-"}</span> &nbsp;&nbsp; '
+                             f'西: <span style="color:{pc(m.pos_west)}">{m.pos_west or "-"}</span>')
+            click = f'data-bs-toggle="modal" data-bs-target="#m{m.id}"' if not m.is_completed else ''
+            cards.append(
+                f'<div class="col-md-4 mb-3">'
+                f'<div class="glass-card p-3 shadow-sm" style="background:rgba(45,55,72,0.4);border-top:3px solid {BOX_COLOR};">'
+                f'<div class="seat-wrapper">{sh}'
+                f'<div class="table-circle {"table-red" if m.is_completed else "table-blue"}" {click}>T-{m.table_no}</div>'
+                f'</div><div class="mt-3 text-center bg-black bg-opacity-25 py-2 rounded">'
+                f'<span style="color:#60A5FA;font-weight:700;">{m.team_a_name}</span>'
+                f' <span style="color:rgba(255,255,255,0.35);">VS</span> '
+                f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span></div></div></div>'
+            )
+            modals += (
+                f'<div class="modal fade" id="m{m.id}"><div class="modal-dialog modal-dialog-centered">'
+                f'<div class="modal-content bg-dark border-info text-white shadow-lg">'
+                f'<form action="/save/{m.id}" method="post"><div class="modal-body p-5 text-center">'
+                f'<h4 class="mb-4 text-info fw-bold">{T("第","Table")} {m.table_no} {T("桌成绩","Score")}</h4>'
+                f'<div class="row align-items-center mb-4">'
+                f'<div class="col-5"><label class="small mb-3 d-block" style="color:#60A5FA;">{m.team_a_name}</label>'
+                f'<input name="sa" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required autofocus></div>'
+                f'<div class="col-2 fs-2 text-info">:</div>'
+                f'<div class="col-5"><label class="small mb-3 d-block" style="color:#FB923C;">{m.team_b_name}</label>'
+                f'<input name="sb" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required></div></div></div>'
+                f'<div class="modal-footer border-0 p-4">'
+                f'<button class="btn btn-info w-100 py-3 fw-bold fs-5 shadow">{T("提交成绩","Submit")}</button>'
+                f'</div></form></div></div></div>'
+            )
+            info_rows += (
+                f'<div style="display:grid;grid-template-columns:75px 1fr;gap:10px;padding:10px 0;'
+                f'border-bottom:1px solid rgba(96,165,250,0.2);align-items:center;">'
+                f'<div style="color:{BOX_COLOR};font-weight:900;font-size:1.15rem;text-align:center;line-height:1.3;">'
+                f'（{m.table_no}）<br><span style="font-size:0.78rem;">号桌</span></div>'
+                f'<div><div style="font-size:0.98rem;margin-bottom:3px;">'
+                f'<span style="color:#60A5FA;font-weight:700;">{m.team_a_name}</span>'
+                f'<span style="color:rgba(255,255,255,0.35);margin:0 6px;">vs</span>'
+                f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span></div>'
+                f'<div style="font-size:0.85rem;">{seats_str}</div>'
+                f'</div></div>'
+            )
+        round_box = (
+            f'<div class="mb-4" style="border:2px solid {BOX_COLOR};border-radius:12px;overflow:hidden;">'
+            f'<div style="background:{BOX_COLOR}22;padding:12px 20px;color:{BOX_COLOR};font-weight:900;font-size:1.2rem;">'
+            f'🏟 第{conf.current_round}轮</div>'
+            f'<div class="p-3"><div class="row">{"".join(cards)}</div>'
+            f'<div style="padding:0 8px;margin-top:8px;">{info_rows}</div></div></div>'
+        )
+        if all_done:
+            next_btn = f'<div class="text-center mt-4"><a href="/next_r" class="btn btn-warning btn-lg px-5 py-3 fw-bold rounded-pill shadow-lg text-dark fs-4">🏁 {T("下一轮编排","Generate Next Round")}</a></div>'
+        else:
+            next_btn = ""
+        html = f'{timer_html}{round_box}{modals}{next_btn}'
 
     return render_layout(html, "matches")
 
