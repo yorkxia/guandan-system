@@ -320,8 +320,10 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
         .table-circle {{ border-radius: 50%; height: 65px; width: 65px; display: flex; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; transition: 0.4s all; border: 2px solid rgba(255,255,255,0.2); position: relative; z-index: 20; }}
         .table-blue {{ background: linear-gradient(135deg, #3b82f6, #1d4ed8); box-shadow: 0 0 20px rgba(59,130,246,0.5); }}
         .table-red {{ background: linear-gradient(135deg, #ef4444, #991b1b) !important; box-shadow: 0 0 20px rgba(239,68,68,0.5); cursor: not-allowed; }}
-        #timer-box {{ background: rgba(30, 41, 59, 0.8); border: 2px solid #3b82f6; border-radius: 60px; width: fit-content; margin: 0 auto 30px; padding: 12px 40px; display: flex; align-items: center; gap: 25px; box-shadow: 0 0 30px rgba(59,130,246,0.3); }}
-        #time-display {{ font-size: 2.2rem; font-weight: 800; font-family: 'Courier New', monospace; color: #3b82f6; text-shadow: 0 0 10px rgba(59,130,246,0.5); }}
+        #timer-box {{ background: rgba(30, 41, 59, 0.8); border: 2px solid #3b82f6; border-radius: 60px; width: fit-content; margin: 0 auto 30px; padding: 12px 40px; display: flex; align-items: center; gap: 25px; box-shadow: 0 0 30px rgba(59,130,246,0.3); transition: all 0.4s ease; }}
+        #time-display {{ font-size: 2.2rem; font-weight: 800; font-family: 'Courier New', monospace; color: #3b82f6; text-shadow: 0 0 10px rgba(59,130,246,0.5); transition: font-size 0.4s ease; }}
+        #timer-box.enlarged {{ width: 100%; height: 33vh; border-radius: 20px; justify-content: center; gap: 40px; padding: 0 60px; box-sizing: border-box; }}
+        #timer-box.enlarged #time-display {{ font-size: 20vh; line-height: 1; }}
         
         .ad-ticker-pro {{ background: linear-gradient(90deg, #991b1b, #ef4444, #991b1b); border-bottom: 2px solid #fbbf24; height: 50px; line-height: 50px; overflow: hidden; position: relative; z-index: 1040; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }}
         .ad-content {{ position: absolute; white-space: nowrap; animation: ticker 25s linear infinite; font-weight: bold; color: #ffffff; font-size: 1.4rem; letter-spacing: 2px; text-shadow: 1px 1px 3px black; }}
@@ -364,6 +366,18 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
             let m=Math.floor(timeLeft/60), s=timeLeft%60; 
             let td = document.getElementById('time-display'); 
             if(td) td.innerText = (m<10?'0'+m:m)+":"+(s<10?'0'+s:s); 
+        }}
+        function toggleClock() {{
+            const box = document.getElementById('timer-box');
+            const btn = document.getElementById('zoom-btn');
+            if (!box) return;
+            if (box.classList.contains('enlarged')) {{
+                box.classList.remove('enlarged');
+                if (btn) btn.innerText = '⤢ 放大时钟';
+            }} else {{
+                box.classList.add('enlarged');
+                if (btn) btn.innerText = '⤡ 缩小时钟';
+            }}
         }}
         function initPanoramaDisplay() {{
             let mins = parseInt(localStorage.getItem('guandan_timer_mins')) || 50;
@@ -934,7 +948,8 @@ def matches():
                   f'<input type="number" id="duration" class="bg-transparent text-info border-0 text-center fw-bold" style="width:55px; outline:none;" value="50"></div>'
                   f'<div id="time-display">00:00</div>'
                   f'<button onclick="startTimer()" class="btn btn-info px-4 fw-bold rounded-pill">{T("开始","Start")}</button>'
-                  f'<button id="pause-btn" onclick="togglePause()" class="btn btn-outline-warning px-4 fw-bold rounded-pill">{T("暂停","Pause")}</button></div>')
+                  f'<button id="pause-btn" onclick="togglePause()" class="btn btn-outline-warning px-4 fw-bold rounded-pill">{T("暂停","Pause")}</button>'
+                  f'<button id="zoom-btn" onclick="toggleClock()" class="btn btn-outline-light px-3 fw-bold rounded-pill" style="font-size:0.85rem;">⤢ 放大时钟</button></div>')
 
     if conf.mode == 1 and conf.stage == 'group':
         # ===== 小组赛：按组分块显示（同积分榜模式）=====
