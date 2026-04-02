@@ -1388,6 +1388,7 @@ def panorama():
         # ===== 小组赛全景：按组分块显示（以 team.group_id 为准，与积分榜一致）=====
         GROUP_COLORS = ['#60A5FA','#34D399','#FBBF24','#F87171','#A78BFA','#FB923C','#38BDF8','#4ADE80']
         groups_html = ""
+        all_detail_rows = ""
         for g in range(1, conf.num_groups + 1):
             color = GROUP_COLORS[(g-1) % len(GROUP_COLORS)]
             g_team_ids = {tid for tid, tm in team_map.items() if (tm.group_id or 0) == g}
@@ -1418,7 +1419,7 @@ def panorama():
                     f' <span style="color:rgba(255,255,255,0.35);">VS</span> '
                     f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span></div></div></div>'
                 )
-            # 本组对阵信息（含座位）
+            # 本组对阵信息（含座位）—— 收集至底部汇总框
             g_rows = ""
             for m in g_matches:
                 is_6p = bool(m.pos_p5 and m.pos_p6)
@@ -1450,16 +1451,31 @@ def panorama():
                     f'<div style="font-size:0.88rem;">{seats_str}</div>'
                     f'</div></div>'
                 )
+            # 小组方框：只显示座位图，不含对阵详情
             groups_html += (
                 f'<div class="mb-5" style="border:2px solid {color};border-radius:16px;padding:24px 32px;background:rgba(0,0,0,0.2);">'
                 f'<div style="color:{color};font-size:1.6rem;font-weight:900;letter-spacing:3px;margin-bottom:18px;">第{g}组 · Group {g}</div>'
                 f'<div class="row">{"".join(g_cards)}</div>'
-                f'<div style="font-size:1.05rem;line-height:1.9;margin-top:12px;">{g_rows}</div>'
                 f'</div>'
+            )
+            # 汇总至底部框，附组别标题
+            all_detail_rows += (
+                f'<div style="color:{color};font-size:1.15rem;font-weight:900;letter-spacing:2px;'
+                f'margin:{"0" if g==1 else "24px"} 0 8px;padding-bottom:6px;'
+                f'border-bottom:2px solid {color};">第{g}组 · Group {g}</div>'
+                f'{g_rows}'
             )
         cards_section = f'<div class="container-fluid px-5 mt-4">{groups_html}</div>'
         stage_label = f'<div style="text-align:center;color:#FBBF24;font-size:1.1rem;font-weight:700;margin:10px 0 20px;letter-spacing:2px;">🏟 第{conf.current_round}轮 小组赛 | {conf.num_groups}组赛制 · 每组出线{conf.advance_per_group}名</div>'
-        grouping_box = stage_label
+        detail_box = (
+            f'<div class="container-fluid px-5 mb-5">'
+            f'<div style="border:2px solid #FBBF24;border-radius:16px;padding:28px 36px;background:rgba(0,0,0,0.25);">'
+            f'<div style="color:#FBBF24;font-size:1.5rem;font-weight:900;letter-spacing:3px;margin-bottom:20px;">'
+            f'📋 第{conf.current_round}轮小组赛 — 桌号 · 队名 · 座位安排</div>'
+            f'<div style="font-size:1.05rem;line-height:1.9;">{all_detail_rows}</div>'
+            f'</div></div>'
+        )
+        grouping_box = stage_label + detail_box
     elif conf.mode == 1 and conf.stage == 'finals':
         # ===== 决赛全景：决赛循环赛置顶 + 历史小组赛数据在下 =====
         cards_html, _ = generate_matches_html(t, conf, is_panorama=True)
