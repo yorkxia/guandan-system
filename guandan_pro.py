@@ -393,7 +393,7 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
                 window.speechSynthesis.speak(u);
             }}
             stopBgMusic();
-            bgAudio = new Audio('/static/Kenny G - Going home\u56de\u5bb6_\u7231\u7ed9\u7f51_aigei_com.mp3');
+            bgAudio = new Audio('/static/kenny_g_going_home.mp3');
             bgAudio.loop = true;
             bgAudio.volume = 0.85;
             bgAudio.play().catch(e => console.warn('Audio play failed:', e));
