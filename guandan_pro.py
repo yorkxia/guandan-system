@@ -403,6 +403,7 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
                            || voices.find(function(v) {{ return v.lang.indexOf('zh') === 0; }});
                 var enVoice = voices.find(function(v) {{ return v.lang === 'en-US'; }})
                            || voices.find(function(v) {{ return v.lang.indexOf('en') === 0; }});
+                window.speechSynthesis.resume();
                 window.speechSynthesis.cancel();
                 var uZh = new SpeechSynthesisUtterance(zhText);
                 uZh.lang = 'zh-TW'; uZh.rate = 0.85; uZh.pitch = 1.15; uZh.volume = 1.0;
@@ -410,8 +411,8 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
                 var uEn = new SpeechSynthesisUtterance(enText);
                 uEn.lang = 'en-US'; uEn.rate = 0.88; uEn.pitch = 1.1; uEn.volume = 1.0;
                 if(enVoice) uEn.voice = enVoice;
-                uZh.onend = function() {{ window.speechSynthesis.speak(uEn); }};
-                window.speechSynthesis.speak(uZh);
+                uZh.onend = function() {{ window.speechSynthesis.resume(); window.speechSynthesis.speak(uEn); }};
+                setTimeout(function() {{ window.speechSynthesis.speak(uZh); }}, 50);
             }}
             if(window.speechSynthesis.getVoices().length > 0) {{
                 doSpeak();
