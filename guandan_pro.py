@@ -862,19 +862,49 @@ def init_game_group():
 # --- 核心页面：共用生成比赛卡片代码 ---
 def generate_matches_html(t, conf, is_panorama=False):
     ms = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).all()
+    team_map = {tm.id: tm for tm in Team.query.filter_by(tournament_id=t.id).all()}
     cards = []
     for m in ms:
         is_6p = bool(m.pos_p5 and m.pos_p6)
+        _ta = team_map.get(m.team_a_id)
+        _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+        pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
         if is_6p:
-            seats_html = f'<div class="seat-player pos-6-1">① {m.pos_north}</div><div class="seat-player pos-6-2">② {m.pos_p5}</div><div class="seat-player pos-6-3">③ {m.pos_east}</div><div class="seat-player pos-6-4">④ {m.pos_south}</div><div class="seat-player pos-6-5">⑤ {m.pos_p6}</div><div class="seat-player pos-6-6">⑥ {m.pos_west}</div>'
+            seats_html = (f'<div class="seat-player pos-6-1" style="color:{pc(m.pos_north)}">① {m.pos_north}</div>'
+                          f'<div class="seat-player pos-6-2" style="color:{pc(m.pos_p5)}">② {m.pos_p5}</div>'
+                          f'<div class="seat-player pos-6-3" style="color:{pc(m.pos_east)}">③ {m.pos_east}</div>'
+                          f'<div class="seat-player pos-6-4" style="color:{pc(m.pos_south)}">④ {m.pos_south}</div>'
+                          f'<div class="seat-player pos-6-5" style="color:{pc(m.pos_p6)}">⑤ {m.pos_p6}</div>'
+                          f'<div class="seat-player pos-6-6" style="color:{pc(m.pos_west)}">⑥ {m.pos_west}</div>')
         else:
-            seats_html = f'<div class="seat-player pos-4-n">[N] {m.pos_north}</div><div class="seat-player pos-4-e">[E] {m.pos_east}</div><div class="seat-player pos-4-s">[S] {m.pos_south}</div><div class="seat-player pos-4-w">[W] {m.pos_west}</div>'
-        
+            seats_html = (f'<div class="seat-player pos-4-n" style="color:{pc(m.pos_north)}">[N] {m.pos_north}</div>'
+                          f'<div class="seat-player pos-4-e" style="color:{pc(m.pos_east)}">[E] {m.pos_east}</div>'
+                          f'<div class="seat-player pos-4-s" style="color:{pc(m.pos_south)}">[S] {m.pos_south}</div>'
+                          f'<div class="seat-player pos-4-w" style="color:{pc(m.pos_west)}">[W] {m.pos_west}</div>')
+
         click_attr = f'data-bs-toggle="modal" data-bs-target="#m{m.id}"' if not m.is_completed and not is_panorama else ''
-        card = f"""<div class="col-md-4 mb-4"><div class="glass-card p-3 shadow-sm" style="background: rgba(45, 55, 72, 0.4);"><div class="seat-wrapper">{seats_html}<div class="table-circle {'table-red' if m.is_completed else 'table-blue'}" {click_attr}>T-{m.table_no}</div></div><div class="mt-4 text-center bg-black bg-opacity-25 py-2 rounded"><span class="badge bg-primary px-3">{m.team_a_name}</span> VS <span class="badge bg-secondary px-3">{m.team_b_name}</span></div></div></div>"""
-        
+        card = (f'<div class="col-md-4 mb-4"><div class="glass-card p-3 shadow-sm" style="background:rgba(45,55,72,0.4);">'
+                f'<div class="seat-wrapper">{seats_html}'
+                f'<div class="table-circle {"table-red" if m.is_completed else "table-blue"}" {click_attr}>T-{m.table_no}</div></div>'
+                f'<div class="mt-4 text-center bg-black bg-opacity-25 py-2 rounded">'
+                f'<span style="color:#60A5FA;font-weight:700;">{m.team_a_name}</span>'
+                f' <span style="color:rgba(255,255,255,0.35);">VS</span> '
+                f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span></div></div></div>')
+
         if not is_panorama:
-            card += f"""<div class="modal fade" id="m{m.id}"><div class="modal-dialog modal-dialog-centered"><div class="modal-content bg-dark border-info text-white shadow-lg"><form action="/save/{m.id}" method="post"><div class="modal-body p-5 text-center"><h4 class="mb-4 text-info fw-bold">{T('第','Table')} {m.table_no} {T('桌成绩','Score')}</h4><div class="row align-items-center mb-4"><div class="col-5"><label class="small mb-3 d-block text-white-50">{m.team_a_name}</label><input name="sa" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required autofocus></div><div class="col-2 fs-2 text-info">:</div><div class="col-5"><label class="small mb-3 d-block text-white-50">{m.team_b_name}</label><input name="sb" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required></div></div></div><div class="modal-footer border-0 p-4"><button class="btn btn-info w-100 py-3 fw-bold fs-5 shadow">{T('提交成绩','Submit')}</button></div></form></div></div></div>"""
+            card += (f'<div class="modal fade" id="m{m.id}"><div class="modal-dialog modal-dialog-centered">'
+                     f'<div class="modal-content bg-dark border-info text-white shadow-lg">'
+                     f'<form action="/save/{m.id}" method="post"><div class="modal-body p-5 text-center">'
+                     f'<h4 class="mb-4 text-info fw-bold">{T("第","Table")} {m.table_no} {T("桌成绩","Score")}</h4>'
+                     f'<div class="row align-items-center mb-4">'
+                     f'<div class="col-5"><label class="small mb-3 d-block" style="color:#60A5FA;">{m.team_a_name}</label>'
+                     f'<input name="sa" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required autofocus></div>'
+                     f'<div class="col-2 fs-2 text-info">:</div>'
+                     f'<div class="col-5"><label class="small mb-3 d-block" style="color:#FB923C;">{m.team_b_name}</label>'
+                     f'<input name="sb" type="number" class="form-control bg-secondary text-white text-center fs-2 fw-bold" required></div></div></div>'
+                     f'<div class="modal-footer border-0 p-4">'
+                     f'<button class="btn btn-info w-100 py-3 fw-bold fs-5 shadow">{T("提交成绩","Submit")}</button>'
+                     f'</div></form></div></div></div>')
         cards.append(card)
         
     all_done = ms and all(m.is_completed for m in ms)
@@ -1300,22 +1330,48 @@ def panorama():
             g_cards = []
             for m in g_matches:
                 is_6p = bool(m.pos_p5 and m.pos_p6)
+                _ta = team_map.get(m.team_a_id)
+                _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+                pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
                 if is_6p:
-                    seats_html = f'<div class="seat-player pos-6-1">① {m.pos_north}</div><div class="seat-player pos-6-2">② {m.pos_p5}</div><div class="seat-player pos-6-3">③ {m.pos_east}</div><div class="seat-player pos-6-4">④ {m.pos_south}</div><div class="seat-player pos-6-5">⑤ {m.pos_p6}</div><div class="seat-player pos-6-6">⑥ {m.pos_west}</div>'
+                    seats_html = (f'<div class="seat-player pos-6-1" style="color:{pc(m.pos_north)}">① {m.pos_north}</div>'
+                                  f'<div class="seat-player pos-6-2" style="color:{pc(m.pos_p5)}">② {m.pos_p5}</div>'
+                                  f'<div class="seat-player pos-6-3" style="color:{pc(m.pos_east)}">③ {m.pos_east}</div>'
+                                  f'<div class="seat-player pos-6-4" style="color:{pc(m.pos_south)}">④ {m.pos_south}</div>'
+                                  f'<div class="seat-player pos-6-5" style="color:{pc(m.pos_p6)}">⑤ {m.pos_p6}</div>'
+                                  f'<div class="seat-player pos-6-6" style="color:{pc(m.pos_west)}">⑥ {m.pos_west}</div>')
                 else:
-                    seats_html = f'<div class="seat-player pos-4-n">[N] {m.pos_north}</div><div class="seat-player pos-4-e">[E] {m.pos_east}</div><div class="seat-player pos-4-s">[S] {m.pos_south}</div><div class="seat-player pos-4-w">[W] {m.pos_west}</div>'
-                g_cards.append(f'<div class="col-md-4 mb-4"><div class="glass-card p-3 shadow-sm" style="background:rgba(45,55,72,0.4);border-top:3px solid {color};"><div class="seat-wrapper">{seats_html}<div class="table-circle table-{"red" if m.is_completed else "blue"}">T-{m.table_no}</div></div><div class="mt-4 text-center bg-black bg-opacity-25 py-2 rounded"><span class="badge bg-primary px-3">{m.team_a_name}</span> VS <span class="badge bg-secondary px-3">{m.team_b_name}</span></div></div></div>')
+                    seats_html = (f'<div class="seat-player pos-4-n" style="color:{pc(m.pos_north)}">[N] {m.pos_north}</div>'
+                                  f'<div class="seat-player pos-4-e" style="color:{pc(m.pos_east)}">[E] {m.pos_east}</div>'
+                                  f'<div class="seat-player pos-4-s" style="color:{pc(m.pos_south)}">[S] {m.pos_south}</div>'
+                                  f'<div class="seat-player pos-4-w" style="color:{pc(m.pos_west)}">[W] {m.pos_west}</div>')
+                g_cards.append(
+                    f'<div class="col-md-4 mb-4"><div class="glass-card p-3 shadow-sm" style="background:rgba(45,55,72,0.4);border-top:3px solid {color};">'
+                    f'<div class="seat-wrapper">{seats_html}<div class="table-circle table-{"red" if m.is_completed else "blue"}">T-{m.table_no}</div></div>'
+                    f'<div class="mt-4 text-center bg-black bg-opacity-25 py-2 rounded">'
+                    f'<span style="color:#60A5FA;font-weight:700;">{m.team_a_name}</span>'
+                    f' <span style="color:rgba(255,255,255,0.35);">VS</span> '
+                    f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span></div></div></div>'
+                )
             # 本组对阵信息（含座位）
             g_rows = ""
             for m in g_matches:
                 is_6p = bool(m.pos_p5 and m.pos_p6)
+                _ta = team_map.get(m.team_a_id)
+                _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+                pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
                 if is_6p:
-                    seats_str = (f'① {m.pos_north or "-"} &nbsp;&nbsp; ② {m.pos_p5 or "-"} &nbsp;&nbsp; '
-                                 f'③ {m.pos_east or "-"} &nbsp;&nbsp; ④ {m.pos_south or "-"} &nbsp;&nbsp; '
-                                 f'⑤ {m.pos_p6 or "-"} &nbsp;&nbsp; ⑥ {m.pos_west or "-"}')
+                    seats_str = (f'① <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp;&nbsp; '
+                                 f'② <span style="color:{pc(m.pos_p5)}">{m.pos_p5 or "-"}</span> &nbsp;&nbsp; '
+                                 f'③ <span style="color:{pc(m.pos_east)}">{m.pos_east or "-"}</span> &nbsp;&nbsp; '
+                                 f'④ <span style="color:{pc(m.pos_south)}">{m.pos_south or "-"}</span> &nbsp;&nbsp; '
+                                 f'⑤ <span style="color:{pc(m.pos_p6)}">{m.pos_p6 or "-"}</span> &nbsp;&nbsp; '
+                                 f'⑥ <span style="color:{pc(m.pos_west)}">{m.pos_west or "-"}</span>')
                 else:
-                    seats_str = (f'北: {m.pos_north or "-"} &nbsp;&nbsp; 南: {m.pos_south or "-"} &nbsp;&nbsp; '
-                                 f'东: {m.pos_east or "-"} &nbsp;&nbsp; 西: {m.pos_west or "-"}')
+                    seats_str = (f'北: <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp;&nbsp; '
+                                 f'南: <span style="color:{pc(m.pos_south)}">{m.pos_south or "-"}</span> &nbsp;&nbsp; '
+                                 f'东: <span style="color:{pc(m.pos_east)}">{m.pos_east or "-"}</span> &nbsp;&nbsp; '
+                                 f'西: <span style="color:{pc(m.pos_west)}">{m.pos_west or "-"}</span>')
                 g_rows += (
                     f'<div style="display:grid;grid-template-columns:80px 1fr;gap:10px;padding:12px 0;'
                     f'border-bottom:1px solid rgba(255,255,255,0.12);align-items:center;">'
@@ -1323,10 +1379,10 @@ def panorama():
                     f'（{m.table_no}）<br><span style="font-size:0.8rem;font-weight:600;">号桌</span></div>'
                     f'<div>'
                     f'<div style="margin-bottom:5px;font-size:1rem;">'
-                    f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                    f'<span style="color:#60A5FA;font-weight:700;">{m.team_a_name}</span>'
                     f'<span style="color:rgba(255,255,255,0.35);margin:0 8px;">vs</span>'
-                    f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span></div>'
-                    f'<div style="color:rgba(255,255,255,0.6);font-size:0.88rem;">{seats_str}</div>'
+                    f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span></div>'
+                    f'<div style="font-size:0.88rem;">{seats_str}</div>'
                     f'</div></div>'
                 )
             groups_html += (
@@ -1346,13 +1402,21 @@ def panorama():
         finals_rows = ""
         for m in ms_all:
             is_6p = bool(m.pos_p5 and m.pos_p6)
+            _ta = team_map.get(m.team_a_id)
+            _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+            pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
             if is_6p:
-                seats_str = (f'① {m.pos_north or "-"} &nbsp;&nbsp; ② {m.pos_p5 or "-"} &nbsp;&nbsp; '
-                             f'③ {m.pos_east or "-"} &nbsp;&nbsp; ④ {m.pos_south or "-"} &nbsp;&nbsp; '
-                             f'⑤ {m.pos_p6 or "-"} &nbsp;&nbsp; ⑥ {m.pos_west or "-"}')
+                seats_str = (f'① <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp;&nbsp; '
+                             f'② <span style="color:{pc(m.pos_p5)}">{m.pos_p5 or "-"}</span> &nbsp;&nbsp; '
+                             f'③ <span style="color:{pc(m.pos_east)}">{m.pos_east or "-"}</span> &nbsp;&nbsp; '
+                             f'④ <span style="color:{pc(m.pos_south)}">{m.pos_south or "-"}</span> &nbsp;&nbsp; '
+                             f'⑤ <span style="color:{pc(m.pos_p6)}">{m.pos_p6 or "-"}</span> &nbsp;&nbsp; '
+                             f'⑥ <span style="color:{pc(m.pos_west)}">{m.pos_west or "-"}</span>')
             else:
-                seats_str = (f'北: {m.pos_north or "-"} &nbsp;&nbsp; 南: {m.pos_south or "-"} &nbsp;&nbsp; '
-                             f'东: {m.pos_east or "-"} &nbsp;&nbsp; 西: {m.pos_west or "-"}')
+                seats_str = (f'北: <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp;&nbsp; '
+                             f'南: <span style="color:{pc(m.pos_south)}">{m.pos_south or "-"}</span> &nbsp;&nbsp; '
+                             f'东: <span style="color:{pc(m.pos_east)}">{m.pos_east or "-"}</span> &nbsp;&nbsp; '
+                             f'西: <span style="color:{pc(m.pos_west)}">{m.pos_west or "-"}</span>')
             finals_rows += (
                 f'<div style="display:grid;grid-template-columns:80px 1fr;gap:10px;padding:14px 0;'
                 f'border-bottom:1px solid rgba(255,215,0,0.2);align-items:center;">'
@@ -1360,10 +1424,10 @@ def panorama():
                 f'（{m.table_no}）<br><span style="font-size:0.82rem;font-weight:600;">号桌</span></div>'
                 f'<div>'
                 f'<div style="margin-bottom:5px;font-size:1.05rem;">'
-                f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                f'<span style="color:#60A5FA;font-weight:700;">{m.team_a_name}</span>'
                 f'<span style="color:rgba(255,255,255,0.35);margin:0 8px;">vs</span>'
-                f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span></div>'
-                f'<div style="color:rgba(255,255,255,0.65);font-size:0.9rem;">{seats_str}</div>'
+                f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span></div>'
+                f'<div style="font-size:0.9rem;">{seats_str}</div>'
                 f'</div></div>'
             )
         # 历史小组赛数据（按轮次→分组，以 team.group_id 为准）
@@ -1384,21 +1448,30 @@ def panorama():
                 grp_rows = ""
                 for m in hist_rounds[rnd][grp]:
                     is_6p = bool(m.pos_p5 and m.pos_p6)
-                    if is_6p:
-                        s_str = (f'① {m.pos_north or "-"} ② {m.pos_p5 or "-"} ③ {m.pos_east or "-"} '
-                                 f'④ {m.pos_south or "-"} ⑤ {m.pos_p6 or "-"} ⑥ {m.pos_west or "-"}')
-                    else:
-                        s_str = (f'北:{m.pos_north or "-"} 南:{m.pos_south or "-"} '
-                                 f'东:{m.pos_east or "-"} 西:{m.pos_west or "-"}')
                     score_str = f'{m.score_a} : {m.score_b}' if m.is_completed else '-'
+                    _hta = team_map.get(m.team_a_id)
+                    _hta_ps = set(p.strip() for p in (_hta.players or '').split(',')) if _hta else set()
+                    hpc = lambda n, _s=_hta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
+                    if is_6p:
+                        s_str = (f'① <span style="color:{hpc(m.pos_north)}">{m.pos_north or "-"}</span> '
+                                 f'② <span style="color:{hpc(m.pos_p5)}">{m.pos_p5 or "-"}</span> '
+                                 f'③ <span style="color:{hpc(m.pos_east)}">{m.pos_east or "-"}</span> '
+                                 f'④ <span style="color:{hpc(m.pos_south)}">{m.pos_south or "-"}</span> '
+                                 f'⑤ <span style="color:{hpc(m.pos_p6)}">{m.pos_p6 or "-"}</span> '
+                                 f'⑥ <span style="color:{hpc(m.pos_west)}">{m.pos_west or "-"}</span>')
+                    else:
+                        s_str = (f'北:<span style="color:{hpc(m.pos_north)}">{m.pos_north or "-"}</span> '
+                                 f'南:<span style="color:{hpc(m.pos_south)}">{m.pos_south or "-"}</span> '
+                                 f'东:<span style="color:{hpc(m.pos_east)}">{m.pos_east or "-"}</span> '
+                                 f'西:<span style="color:{hpc(m.pos_west)}">{m.pos_west or "-"}</span>')
                     grp_rows += (
                         f'<div style="display:grid;grid-template-columns:70px 1fr 55px;gap:8px;padding:8px 0;'
                         f'border-bottom:1px solid rgba(255,255,255,0.07);align-items:center;font-size:0.87rem;">'
                         f'<div style="color:{hcolor};font-weight:800;text-align:center;">（{m.table_no}）号桌</div>'
-                        f'<div><span style="color:#7EC8E3;font-weight:600;">{m.team_a_name}</span>'
+                        f'<div><span style="color:#60A5FA;font-weight:600;">{m.team_a_name}</span>'
                         f' <span style="color:rgba(255,255,255,0.3);">vs</span>'
-                        f' <span style="color:#F9A8D4;font-weight:600;">{m.team_b_name}</span>'
-                        f'<br><span style="color:rgba(255,255,255,0.45);">{s_str}</span></div>'
+                        f' <span style="color:#FB923C;font-weight:600;">{m.team_b_name}</span>'
+                        f'<br><span style="font-size:0.82rem;">{s_str}</span></div>'
                         f'<div style="color:#FFD700;font-weight:700;text-align:center;">{score_str}</div>'
                         f'</div>'
                     )
@@ -1446,13 +1519,21 @@ def panorama():
         grouping_rows = ""
         for m in ms_all:
             is_6p = bool(m.pos_p5 and m.pos_p6)
+            _ta = team_map.get(m.team_a_id)
+            _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+            pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
             if is_6p:
-                seats_str = (f'① {m.pos_north or "-"} &nbsp;&nbsp; ② {m.pos_p5 or "-"} &nbsp;&nbsp; '
-                             f'③ {m.pos_east or "-"} &nbsp;&nbsp; ④ {m.pos_south or "-"} &nbsp;&nbsp; '
-                             f'⑤ {m.pos_p6 or "-"} &nbsp;&nbsp; ⑥ {m.pos_west or "-"}')
+                seats_str = (f'① <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp;&nbsp; '
+                             f'② <span style="color:{pc(m.pos_p5)}">{m.pos_p5 or "-"}</span> &nbsp;&nbsp; '
+                             f'③ <span style="color:{pc(m.pos_east)}">{m.pos_east or "-"}</span> &nbsp;&nbsp; '
+                             f'④ <span style="color:{pc(m.pos_south)}">{m.pos_south or "-"}</span> &nbsp;&nbsp; '
+                             f'⑤ <span style="color:{pc(m.pos_p6)}">{m.pos_p6 or "-"}</span> &nbsp;&nbsp; '
+                             f'⑥ <span style="color:{pc(m.pos_west)}">{m.pos_west or "-"}</span>')
             else:
-                seats_str = (f'北: {m.pos_north or "-"} &nbsp;&nbsp; 南: {m.pos_south or "-"} &nbsp;&nbsp; '
-                             f'东: {m.pos_east or "-"} &nbsp;&nbsp; 西: {m.pos_west or "-"}')
+                seats_str = (f'北: <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp;&nbsp; '
+                             f'南: <span style="color:{pc(m.pos_south)}">{m.pos_south or "-"}</span> &nbsp;&nbsp; '
+                             f'东: <span style="color:{pc(m.pos_east)}">{m.pos_east or "-"}</span> &nbsp;&nbsp; '
+                             f'西: <span style="color:{pc(m.pos_west)}">{m.pos_west or "-"}</span>')
             grouping_rows += (
                 f'<div style="display:grid;grid-template-columns:80px 1fr;gap:10px;padding:14px 0;'
                 f'border-bottom:1px solid rgba(255,215,0,0.2);align-items:center;">'
@@ -1460,10 +1541,10 @@ def panorama():
                 f'（{m.table_no}）<br><span style="font-size:0.82rem;font-weight:600;">号桌</span></div>'
                 f'<div>'
                 f'<div style="margin-bottom:5px;font-size:1.05rem;">'
-                f'<span style="color:#7EC8E3;font-weight:700;">{m.team_a_name}</span>'
+                f'<span style="color:#60A5FA;font-weight:700;">{m.team_a_name}</span>'
                 f'<span style="color:rgba(255,255,255,0.35);margin:0 8px;">vs</span>'
-                f'<span style="color:#F9A8D4;font-weight:700;">{m.team_b_name}</span></div>'
-                f'<div style="color:rgba(255,255,255,0.65);font-size:0.9rem;">{seats_str}</div>'
+                f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span></div>'
+                f'<div style="font-size:0.9rem;">{seats_str}</div>'
                 f'</div></div>'
             )
         cards_section = f'<div class="container-fluid px-5 mt-4"><div class="row">{cards_html}</div></div>'
