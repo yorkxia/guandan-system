@@ -867,7 +867,7 @@ def generate_matches_html(t, conf, is_panorama=False):
     for m in ms:
         is_6p = bool(m.pos_p5 and m.pos_p6)
         _ta = team_map.get(m.team_a_id)
-        _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+        _ta_ps = set(p.strip() for p in (_ta.players or '').replace('，', ',').split(',') if p.strip()) if _ta else set()
         pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
         if is_6p:
             seats_html = (f'<div class="seat-player pos-6-1" style="color:{pc(m.pos_north)}">① {m.pos_north}</div>'
@@ -952,7 +952,7 @@ def matches():
             for m in g_matches:
                 is_6p = bool(m.pos_p5 and m.pos_p6)
                 _ta = team_map.get(m.team_a_id)
-                _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+                _ta_ps = set(p.strip() for p in (_ta.players or '').replace('，', ',').split(',') if p.strip()) if _ta else set()
                 pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
                 if is_6p:
                     sh = (f'<div class="seat-player pos-6-1" style="color:{pc(m.pos_north)}">① {m.pos_north}</div>'
@@ -998,7 +998,7 @@ def matches():
             for m in g_matches:
                 is_6p = bool(m.pos_p5 and m.pos_p6)
                 _ta = team_map.get(m.team_a_id)
-                _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+                _ta_ps = set(p.strip() for p in (_ta.players or '').replace('，', ',').split(',') if p.strip()) if _ta else set()
                 pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
                 if is_6p:
                     seats_str = (f'① <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp; '
@@ -1088,7 +1088,7 @@ def matches():
         for m in ms:
             is_6p = bool(m.pos_p5 and m.pos_p6)
             _ta = team_map.get(m.team_a_id)
-            _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+            _ta_ps = set(p.strip() for p in (_ta.players or '').replace('，', ',').split(',') if p.strip()) if _ta else set()
             pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
             if is_6p:
                 sh = (f'<div class="seat-player pos-6-1" style="color:{pc(m.pos_north)}">① {m.pos_north}</div>'
@@ -1180,22 +1180,30 @@ def matches():
                 rnd_rows = ""
                 for m in rounds_data[rnd]:
                     is_6p = bool(m.pos_p5 and m.pos_p6)
+                    _rta = team_map.get(m.team_a_id)
+                    _rta_ps = set(p.strip() for p in (_rta.players or '').replace('，', ',').split(',') if p.strip()) if _rta else set()
+                    rpc = lambda n, _s=_rta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
                     if is_6p:
-                        s_str = (f'① {m.pos_north or "-"} ② {m.pos_p5 or "-"} '
-                                 f'③ {m.pos_east or "-"} ④ {m.pos_south or "-"} '
-                                 f'⑤ {m.pos_p6 or "-"} ⑥ {m.pos_west or "-"}')
+                        s_str = (f'① <span style="color:{rpc(m.pos_north)}">{m.pos_north or "-"}</span> '
+                                 f'② <span style="color:{rpc(m.pos_p5)}">{m.pos_p5 or "-"}</span> '
+                                 f'③ <span style="color:{rpc(m.pos_east)}">{m.pos_east or "-"}</span> '
+                                 f'④ <span style="color:{rpc(m.pos_south)}">{m.pos_south or "-"}</span> '
+                                 f'⑤ <span style="color:{rpc(m.pos_p6)}">{m.pos_p6 or "-"}</span> '
+                                 f'⑥ <span style="color:{rpc(m.pos_west)}">{m.pos_west or "-"}</span>')
                     else:
-                        s_str = (f'北:{m.pos_north or "-"} 南:{m.pos_south or "-"} '
-                                 f'东:{m.pos_east or "-"} 西:{m.pos_west or "-"}')
+                        s_str = (f'北:<span style="color:{rpc(m.pos_north)}">{m.pos_north or "-"}</span> '
+                                 f'南:<span style="color:{rpc(m.pos_south)}">{m.pos_south or "-"}</span> '
+                                 f'东:<span style="color:{rpc(m.pos_east)}">{m.pos_east or "-"}</span> '
+                                 f'西:<span style="color:{rpc(m.pos_west)}">{m.pos_west or "-"}</span>')
                     score_str = f'{m.score_a} : {m.score_b}' if m.is_completed and m.score_a >= 0 else '-'
                     rnd_rows += (
                         f'<div style="display:grid;grid-template-columns:70px 1fr 60px;gap:8px;padding:8px 0;'
                         f'border-bottom:1px solid rgba(255,255,255,0.07);font-size:0.87rem;align-items:center;">'
                         f'<div style="color:{color};font-weight:800;text-align:center;">（{m.table_no}）号桌</div>'
-                        f'<div><span style="color:#7EC8E3;font-weight:600;">{m.team_a_name}</span>'
+                        f'<div><span style="color:#60A5FA;font-weight:600;">{m.team_a_name}</span>'
                         f' <span style="color:rgba(255,255,255,0.3);">vs</span>'
-                        f' <span style="color:#F9A8D4;font-weight:600;">{m.team_b_name}</span>'
-                        f'<br><span style="color:rgba(255,255,255,0.42);font-size:0.82rem;">{s_str}</span></div>'
+                        f' <span style="color:#FB923C;font-weight:600;">{m.team_b_name}</span>'
+                        f'<br><span style="font-size:0.82rem;">{s_str}</span></div>'
                         f'<div style="color:#FFD700;font-weight:700;text-align:center;">{score_str}</div>'
                         f'</div>'
                     )
@@ -1233,7 +1241,7 @@ def matches():
         for m in ms:
             is_6p = bool(m.pos_p5 and m.pos_p6)
             _ta = team_map.get(m.team_a_id)
-            _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+            _ta_ps = set(p.strip() for p in (_ta.players or '').replace('，', ',').split(',') if p.strip()) if _ta else set()
             pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
             if is_6p:
                 sh = (f'<div class="seat-player pos-6-1" style="color:{pc(m.pos_north)}">① {m.pos_north}</div>'
@@ -1331,7 +1339,7 @@ def panorama():
             for m in g_matches:
                 is_6p = bool(m.pos_p5 and m.pos_p6)
                 _ta = team_map.get(m.team_a_id)
-                _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+                _ta_ps = set(p.strip() for p in (_ta.players or '').replace('，', ',').split(',') if p.strip()) if _ta else set()
                 pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
                 if is_6p:
                     seats_html = (f'<div class="seat-player pos-6-1" style="color:{pc(m.pos_north)}">① {m.pos_north}</div>'
@@ -1358,7 +1366,7 @@ def panorama():
             for m in g_matches:
                 is_6p = bool(m.pos_p5 and m.pos_p6)
                 _ta = team_map.get(m.team_a_id)
-                _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+                _ta_ps = set(p.strip() for p in (_ta.players or '').replace('，', ',').split(',') if p.strip()) if _ta else set()
                 pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
                 if is_6p:
                     seats_str = (f'① <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp;&nbsp; '
@@ -1403,7 +1411,7 @@ def panorama():
         for m in ms_all:
             is_6p = bool(m.pos_p5 and m.pos_p6)
             _ta = team_map.get(m.team_a_id)
-            _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+            _ta_ps = set(p.strip() for p in (_ta.players or '').replace('，', ',').split(',') if p.strip()) if _ta else set()
             pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
             if is_6p:
                 seats_str = (f'① <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp;&nbsp; '
@@ -1450,7 +1458,7 @@ def panorama():
                     is_6p = bool(m.pos_p5 and m.pos_p6)
                     score_str = f'{m.score_a} : {m.score_b}' if m.is_completed else '-'
                     _hta = team_map.get(m.team_a_id)
-                    _hta_ps = set(p.strip() for p in (_hta.players or '').split(',')) if _hta else set()
+                    _hta_ps = set(p.strip() for p in (_hta.players or '').replace('，', ',').split(',') if p.strip()) if _hta else set()
                     hpc = lambda n, _s=_hta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
                     if is_6p:
                         s_str = (f'① <span style="color:{hpc(m.pos_north)}">{m.pos_north or "-"}</span> '
@@ -1520,7 +1528,7 @@ def panorama():
         for m in ms_all:
             is_6p = bool(m.pos_p5 and m.pos_p6)
             _ta = team_map.get(m.team_a_id)
-            _ta_ps = set(p.strip() for p in (_ta.players or '').split(',')) if _ta else set()
+            _ta_ps = set(p.strip() for p in (_ta.players or '').replace('，', ',').split(',') if p.strip()) if _ta else set()
             pc = lambda n, _s=_ta_ps: '#60A5FA' if (n and n.strip() in _s) else '#FB923C'
             if is_6p:
                 seats_str = (f'① <span style="color:{pc(m.pos_north)}">{m.pos_north or "-"}</span> &nbsp;&nbsp; '
