@@ -334,6 +334,7 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
     </style>
     <script>
         let timer; let timeLeft; let isPaused = false;
+        let audioCtx = null; let bgMusicNodes = []; let musicLoopTimer = null; let fiveMinAlertDone = false;
         function startTimer() {{
             let durEl = document.getElementById('duration');
             let mins;
@@ -346,11 +347,13 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
             timeLeft = mins * 60;
             if(timer) clearInterval(timer);
             isPaused = false;
+            fiveMinAlertDone = false;
+            stopBgMusic();
             updateTimerDisplay();
             timer = setInterval(() => {{
                 if(!isPaused) {{
-                    if(timeLeft <= 0) {{ clearInterval(timer); let td = document.getElementById('time-display'); if(td) {{ td.innerText = "FINISH"; td.style.color = "#ef4444"; }} }}
-                    else {{ timeLeft--; updateTimerDisplay(); }}
+                    if(timeLeft <= 0) {{ clearInterval(timer); stopBgMusic(); let td = document.getElementById('time-display'); if(td) {{ td.innerText = "FINISH"; td.style.color = "#ef4444"; }} }}
+                    else {{ timeLeft--; updateTimerDisplay(); if(timeLeft === 300 && !fiveMinAlertDone) {{ fiveMinAlertDone = true; startFiveMinuteAlert(); }} }}
                 }}
             }}, 1000);
         }}
@@ -378,6 +381,55 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
                 box.classList.add('enlarged');
                 if (btn) btn.innerText = '⤡ 缩小时钟';
             }}
+        }}
+        function stopBgMusic() {{
+            if(musicLoopTimer) {{ clearTimeout(musicLoopTimer); musicLoopTimer = null; }}
+            bgMusicNodes.forEach(n => {{ try {{ n.stop(0); }} catch(e) {{}} }});
+            bgMusicNodes = [];
+        }}
+        function startFiveMinuteAlert() {{
+            if('speechSynthesis' in window) {{
+                window.speechSynthesis.cancel();
+                const u = new SpeechSynthesisUtterance('女士们，先生们，比赛已经进入5分钟倒计时，请没有赛完的女士们先生们抓紧时间结束比赛，刚刚赛完的尽快启动最后一轮比赛，祝大家愉快并且取得好成绩');
+                u.lang = 'zh-CN'; u.rate = 0.88; u.pitch = 1.05; u.volume = 1.0;
+                window.speechSynthesis.speak(u);
+            }}
+            startSaxMusic();
+        }}
+        function startSaxMusic() {{
+            stopBgMusic();
+            if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if(audioCtx.state === 'suspended') audioCtx.resume();
+            playMelodyLoop();
+        }}
+        function playMelodyLoop() {{
+            if(timeLeft <= 0) return;
+            const notes = [392, 440, 523.25, 587.33, 523.25, 440, 392, 329.63, 392, 440, 523.25, 440];
+            const durs  = [0.25, 0.25, 0.4, 0.25, 0.25, 0.25, 0.25, 0.4, 0.25, 0.25, 0.5, 0.75];
+            let t = audioCtx.currentTime + 0.05;
+            let nodes = [];
+            notes.forEach((freq, i) => {{
+                const osc = audioCtx.createOscillator();
+                const filt = audioCtx.createBiquadFilter();
+                const gainNode = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(freq, t);
+                osc.detune.setValueAtTime(5, t);
+                filt.type = 'lowpass';
+                filt.frequency.setValueAtTime(1400, t);
+                filt.Q.setValueAtTime(3, t);
+                const d = durs[i];
+                gainNode.gain.setValueAtTime(0, t);
+                gainNode.gain.linearRampToValueAtTime(0.18, t + 0.04);
+                gainNode.gain.setValueAtTime(0.14, t + d * 0.7);
+                gainNode.gain.linearRampToValueAtTime(0, t + d);
+                osc.connect(filt); filt.connect(gainNode); gainNode.connect(audioCtx.destination);
+                osc.start(t); osc.stop(t + d);
+                nodes.push(osc); t += d;
+            }});
+            bgMusicNodes = nodes;
+            const totalMs = durs.reduce((a, b) => a + b, 0) * 1000;
+            musicLoopTimer = setTimeout(() => {{ bgMusicNodes = []; if(timeLeft > 0) playMelodyLoop(); }}, totalMs + 120);
         }}
         function initPanoramaDisplay() {{
             let mins = parseInt(localStorage.getItem('guandan_timer_mins')) || 50;
