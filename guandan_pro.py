@@ -1676,7 +1676,7 @@ def save(mid):
 
 def _team_score_row(i, team, show_group=False):
     group_badge = f'<span class="badge bg-secondary me-1">第{team.group_id}组</span>' if show_group and team.group_id else ''
-    row = (f"<tr><td>{i+1}</td><td class='text-info fw-bold'>{group_badge}{team.name}</td>"
+    row = (f"<tr><td>{i}</td><td class='text-info fw-bold'>{group_badge}{team.name}</td>"
            f"<td class='text-warning'>{team.current_score}</td><td class='text-success'>{team.round_score}</td>"
            f"<td>{team.players} <a href='#' data-bs-toggle='modal' data-bs-target='#editScore{team.id}' class='text-secondary ms-2' style='text-decoration:none;'>✎</a></td></tr>")
     modal = (f"<div class='modal fade' id='editScore{team.id}'><div class='modal-dialog modal-dialog-centered'><div class='modal-content bg-dark text-white border-warning shadow-lg'>"
