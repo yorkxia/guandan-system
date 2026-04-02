@@ -919,7 +919,8 @@ def init_game_group():
 def generate_matches_html(t, conf, is_panorama=False, finalist_ids=None):
     ms_raw = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).all()
     if finalist_ids is not None:
-        ms = [m for m in ms_raw if m.team_a_id in finalist_ids and m.team_b_id in finalist_ids]
+        # 决赛对阵 group_id=0，小组赛对阵 group_id>0——必须同时过滤，防止两支决赛队的旧小组赛对阵混入
+        ms = [m for m in ms_raw if (m.group_id or 0) == 0 and m.team_a_id in finalist_ids and m.team_b_id in finalist_ids]
     else:
         ms = ms_raw
     team_map = {tm.id: tm for tm in Team.query.filter_by(tournament_id=t.id).all()}
@@ -1490,7 +1491,7 @@ def panorama():
         finalist_ids = {tid for tid, tm in team_map.items() if tm.is_finalist}
         cards_html, _ = generate_matches_html(t, conf, is_panorama=True, finalist_ids=finalist_ids)
         # 决赛对阵信息（含座位）—— 只取双方均为决赛队的对阵
-        ms_finals = [m for m in ms_all if m.team_a_id in finalist_ids and m.team_b_id in finalist_ids]
+        ms_finals = [m for m in ms_all if (m.group_id or 0) == 0]
         finals_rows = ""
         for m in ms_finals:
             is_6p = bool(m.pos_p5 and m.pos_p6)
