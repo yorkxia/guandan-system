@@ -916,8 +916,12 @@ def init_game_group():
     return redirect(url_for('matches'))
 
 # --- 核心页面：共用生成比赛卡片代码 ---
-def generate_matches_html(t, conf, is_panorama=False):
-    ms = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).all()
+def generate_matches_html(t, conf, is_panorama=False, finalist_ids=None):
+    ms_raw = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).all()
+    if finalist_ids is not None:
+        ms = [m for m in ms_raw if m.team_a_id in finalist_ids and m.team_b_id in finalist_ids]
+    else:
+        ms = ms_raw
     team_map = {tm.id: tm for tm in Team.query.filter_by(tournament_id=t.id).all()}
     cards = []
     for m in ms:
@@ -1483,10 +1487,12 @@ def panorama():
         grouping_box = stage_label + detail_box
     elif conf.mode == 1 and conf.stage == 'finals':
         # ===== 决赛全景：决赛循环赛置顶 + 历史小组赛数据在下 =====
-        cards_html, _ = generate_matches_html(t, conf, is_panorama=True)
-        # 决赛对阵信息（含座位）
+        finalist_ids = {tid for tid, tm in team_map.items() if tm.is_finalist}
+        cards_html, _ = generate_matches_html(t, conf, is_panorama=True, finalist_ids=finalist_ids)
+        # 决赛对阵信息（含座位）—— 只取双方均为决赛队的对阵
+        ms_finals = [m for m in ms_all if m.team_a_id in finalist_ids and m.team_b_id in finalist_ids]
         finals_rows = ""
-        for m in ms_all:
+        for m in ms_finals:
             is_6p = bool(m.pos_p5 and m.pos_p6)
             _ta = team_map.get(m.team_a_id)
             _ta_ps = set(p.strip() for p in (_ta.players or '').replace('，', ',').split(',') if p.strip()) if _ta else set()
@@ -1516,14 +1522,13 @@ def panorama():
                 f'<div style="font-size:0.9rem;">{seats_str}</div>'
                 f'</div></div>'
             )
-        # 历史小组赛数据（按轮次→分组，以 team.group_id 为准）
+        # 历史小组赛数据（按轮次→分组，以 match.group_id 为准——小组赛对阵 group_id>0，决赛对阵 group_id=0）
         hist_matches = Match.query.filter_by(tournament_id=t.id).order_by(Match.round_no, Match.table_no).all()
-        # 只保留小组赛阶段的对阵（通过 team.group_id 判断，group_id>0 说明是小组赛队伍）
         hist_rounds = {}
         for m in hist_matches:
-            ta = team_map.get(m.team_a_id)
-            if ta and (ta.group_id or 0) > 0:
-                grp = ta.group_id
+            if (m.group_id or 0) > 0:  # 只保留小组赛对阵（决赛对阵 group_id=0，已排除）
+                ta = team_map.get(m.team_a_id)
+                grp = (ta.group_id if ta else 0) or m.group_id
                 hist_rounds.setdefault(m.round_no, {}).setdefault(grp, []).append(m)
         GROUP_COLORS_H = ['#60A5FA','#34D399','#FBBF24','#F87171','#A78BFA','#FB923C','#38BDF8','#4ADE80']
         hist_html = ""
