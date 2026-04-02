@@ -1630,7 +1630,13 @@ def panorama():
                         f'<div style="margin-top:28px;text-align:center;"><a href="/export_grouping" style="display:inline-block;background:linear-gradient(135deg,#F59E0B,#D97706);color:#fff;font-size:1.1rem;font-weight:800;padding:14px 48px;border-radius:50px;text-decoration:none;letter-spacing:1px;box-shadow:0 4px 20px rgba(245,158,11,0.4);">📥 导出参赛分组信息</a></div>'
                         f'</div></div>')
 
-    html = f'{marquee}<div class="container-fluid px-5 mt-2"><div id="timer-box" style="transform:scale(1.2);margin-top:20px;margin-bottom:50px;"><div id="time-display" style="margin:0 30px;">--:--</div></div></div>{cards_section}{grouping_box}<script>window.onload=function(){{initPanoramaDisplay();startTimer();}};</script>'
+    panorama_timer = (f'<div id="timer-box"><div class="small text-secondary text-center">计时 Timer<br>'
+                      f'<input type="number" id="duration" class="bg-transparent text-info border-0 text-center fw-bold" style="width:55px; outline:none;" value="50"></div>'
+                      f'<div id="time-display">00:00</div>'
+                      f'<button onclick="startTimer()" class="btn btn-info px-4 fw-bold rounded-pill">开始 Start</button>'
+                      f'<button id="pause-btn" onclick="togglePause()" class="btn btn-outline-warning px-4 fw-bold rounded-pill">暂停 Pause</button>'
+                      f'<button id="zoom-btn" onclick="toggleClock()" class="btn btn-outline-light px-3 fw-bold rounded-pill" style="font-size:0.85rem;">⤢ 放大时钟</button></div>')
+    html = f'{marquee}<div class="container-fluid px-5 mt-2">{panorama_timer}</div>{cards_section}{grouping_box}<script>window.onload=function(){{initPanoramaDisplay();}};</script>'
     return render_layout(html, active="panorama", hide_nav=True)
 
 @app.route('/export_grouping')
