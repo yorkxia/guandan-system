@@ -385,56 +385,39 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
         function stopBgMusic() {{
             if(bgAudio) {{ bgAudio.pause(); bgAudio.currentTime = 0; bgAudio = null; }}
         }}
-        function getBestVoice(lang) {{
-            const voices = window.speechSynthesis.getVoices();
-            const preferred = ['zh-TW','zh_TW','zh-Hant'];
-            let v = null;
-            if(lang === 'zh') {{
-                // 优先台湾女声（最接近林志玲风格）
-                for(const p of preferred) {{
-                    v = voices.find(x => x.lang.startsWith(p) && /female|woman|girl|mei|hanhan|yating|zh-TW/i.test(x.name + x.lang));
-                    if(v) break;
-                }}
-                if(!v) v = voices.find(x => x.lang.startsWith('zh-TW') || x.lang.startsWith('zh_TW'));
-                if(!v) v = voices.find(x => x.lang.startsWith('zh'));
-            }} else {{
-                // 英文优先选女声
-                v = voices.find(x => x.lang.startsWith('en') && /female|woman|girl|samantha|karen|victoria|zira/i.test(x.name));
-                if(!v) v = voices.find(x => x.lang.startsWith('en-US') || x.lang.startsWith('en-GB'));
-                if(!v) v = voices.find(x => x.lang.startsWith('en'));
-            }}
-            return v || null;
-        }}
         function startFiveMinuteAlert() {{
             stopBgMusic();
             bgAudio = new Audio('/static/kenny_g_going_home.mp3');
             bgAudio.loop = true;
             bgAudio.volume = 0.75;
-            bgAudio.play().catch(e => console.warn('Audio play failed:', e));
+            bgAudio.play().catch(function(e) {{ console.warn('Audio play failed:', e); }});
             if(!('speechSynthesis' in window)) return;
             const zhText = '女士们，先生们，比赛已经进入五分钟倒计时，请没有赛完的选手们抓紧时间结束比赛，刚刚赛完的请尽快启动最后一轮比赛，祝大家愉快并取得好成绩！';
             const enText = 'Ladies and gentlemen, the tournament has entered the final five-minute countdown. Please finish your current game as soon as possible. If you have just finished, please start your final round immediately. We wish everyone a wonderful time and great results!';
-            function speakZh() {{
+            var _spoken = false;
+            function doSpeak() {{
+                if(_spoken) return; _spoken = true;
+                var voices = window.speechSynthesis.getVoices();
+                var zhVoice = voices.find(function(v) {{ return v.lang === 'zh-TW'; }})
+                           || voices.find(function(v) {{ return v.lang.indexOf('zh-TW') === 0; }})
+                           || voices.find(function(v) {{ return v.lang.indexOf('zh') === 0; }});
+                var enVoice = voices.find(function(v) {{ return v.lang === 'en-US'; }})
+                           || voices.find(function(v) {{ return v.lang.indexOf('en') === 0; }});
                 window.speechSynthesis.cancel();
-                const u = new SpeechSynthesisUtterance(zhText);
-                u.lang = 'zh-TW'; u.rate = 0.85; u.pitch = 1.15; u.volume = 1.0;
-                const v = getBestVoice('zh');
-                if(v) u.voice = v;
-                u.onend = () => setTimeout(speakEn, 600);
-                window.speechSynthesis.speak(u);
+                var uZh = new SpeechSynthesisUtterance(zhText);
+                uZh.lang = 'zh-TW'; uZh.rate = 0.85; uZh.pitch = 1.15; uZh.volume = 1.0;
+                if(zhVoice) uZh.voice = zhVoice;
+                var uEn = new SpeechSynthesisUtterance(enText);
+                uEn.lang = 'en-US'; uEn.rate = 0.88; uEn.pitch = 1.1; uEn.volume = 1.0;
+                if(enVoice) uEn.voice = enVoice;
+                uZh.onend = function() {{ window.speechSynthesis.speak(uEn); }};
+                window.speechSynthesis.speak(uZh);
             }}
-            function speakEn() {{
-                const u = new SpeechSynthesisUtterance(enText);
-                u.lang = 'en-US'; u.rate = 0.88; u.pitch = 1.1; u.volume = 1.0;
-                const v = getBestVoice('en');
-                if(v) u.voice = v;
-                window.speechSynthesis.speak(u);
-            }}
-            // getVoices() 可能异步加载，稍等后触发
             if(window.speechSynthesis.getVoices().length > 0) {{
-                speakZh();
+                doSpeak();
             }} else {{
-                window.speechSynthesis.onvoiceschanged = () => {{ window.speechSynthesis.onvoiceschanged = null; speakZh(); }};
+                window.speechSynthesis.onvoiceschanged = function() {{ doSpeak(); }};
+                setTimeout(doSpeak, 800);
             }}
         }}
         function initPanoramaDisplay() {{
