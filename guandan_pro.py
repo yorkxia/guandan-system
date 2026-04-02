@@ -1141,7 +1141,7 @@ def matches():
 
         # 只取当前轮次里两队均为决赛队的对阵（避免 round_no 与小组赛冲突）
         ms_all_cur = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).order_by(Match.table_no).all()
-        ms = [m for m in ms_all_cur if m.team_a_id in finalist_ids and m.team_b_id in finalist_ids]
+        ms = [m for m in ms_all_cur if (m.group_id or 0) == 0 and m.team_a_id in finalist_ids and m.team_b_id in finalist_ids]
 
         all_done = bool(ms) and all(m.is_completed for m in ms)
         finals_cards = []
