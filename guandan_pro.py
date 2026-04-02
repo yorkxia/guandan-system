@@ -1473,6 +1473,11 @@ def panorama():
             f'<div style="color:#FBBF24;font-size:1.5rem;font-weight:900;letter-spacing:3px;margin-bottom:20px;">'
             f'📋 第{conf.current_round}轮小组赛 — 桌号 · 队名 · 座位安排</div>'
             f'<div style="font-size:1.05rem;line-height:1.9;">{all_detail_rows}</div>'
+            f'<div style="margin-top:28px;text-align:center;">'
+            f'<a href="/export_group_matches" style="display:inline-block;background:linear-gradient(135deg,#F59E0B,#D97706);'
+            f'color:#fff;font-size:1.1rem;font-weight:800;padding:14px 48px;border-radius:50px;text-decoration:none;'
+            f'letter-spacing:1px;box-shadow:0 4px 20px rgba(245,158,11,0.4);">📥 导出小组赛对阵信息 (Excel)</a>'
+            f'</div>'
             f'</div></div>'
         )
         grouping_box = stage_label + detail_box
@@ -1670,6 +1675,53 @@ def export_grouping():
     output.seek(0)
     log_act("Export Grouping", f"Round {conf.current_round} grouping exported.", t.id)
     return send_file(output, as_attachment=True, download_name=f"分组信息_第{conf.current_round}轮_{t.name}.xlsx")
+
+@app.route('/export_group_matches')
+def export_group_matches():
+    t = get_active_t()
+    if not t: return "No active tournament"
+    team_map = {team.id: team for team in Team.query.filter_by(tournament_id=t.id).all()}
+    all_matches = Match.query.filter_by(tournament_id=t.id).order_by(Match.round_no, Match.table_no).all()
+    export_data = []
+    for m in all_matches:
+        ta = team_map.get(m.team_a_id)
+        if not ta or not (ta.group_id or 0) > 0:
+            continue
+        is_6p = bool(m.pos_p5 and m.pos_p6)
+        if is_6p:
+            row = {
+                "轮次": f"第{m.round_no}轮",
+                "组别": f"第{ta.group_id}组",
+                "桌号": m.table_no,
+                "队伍A": m.team_a_name,
+                "队伍B": m.team_b_name,
+                "① 北": m.pos_north or "",
+                "②": m.pos_p5 or "",
+                "③ 东": m.pos_east or "",
+                "④ 南": m.pos_south or "",
+                "⑤": m.pos_p6 or "",
+                "⑥ 西": m.pos_west or "",
+            }
+        else:
+            row = {
+                "轮次": f"第{m.round_no}轮",
+                "组别": f"第{ta.group_id}组",
+                "桌号": m.table_no,
+                "队伍A": m.team_a_name,
+                "队伍B": m.team_b_name,
+                "北(N)": m.pos_north or "",
+                "东(E)": m.pos_east or "",
+                "南(S)": m.pos_south or "",
+                "西(W)": m.pos_west or "",
+            }
+        export_data.append(row)
+    df = pd.DataFrame(export_data)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name="小组赛对阵")
+    output.seek(0)
+    log_act("Export Group Matches", f"Group stage matches exported for {t.name}.", t.id)
+    return send_file(output, as_attachment=True, download_name=f"小组赛对阵_{t.name}.xlsx")
 
 @app.route('/save/<int:mid>', methods=['POST'])
 def save(mid):
