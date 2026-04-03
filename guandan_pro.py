@@ -230,11 +230,10 @@ def swiss_pairing(t_id, round_no):
     return result, bye_team
 
 def roundrobin_pairing(t_id, round_no):
-    """纯粹轮流循环赛：按固定顺序避免重复对阵，不按积分排序"""
+    """纯粹轮流循环赛：按固定顺序避免重复对阵，不按积分排序。
+    使用 total_r=9999 确保所有轮次始终优先尝试无重复对阵，不因"最后一轮"而提前放开限制。"""
     teams = Team.query.filter_by(tournament_id=t_id).all()
     teams.sort(key=lambda x: x.id)
-    n = len(teams)
-    total_r = (n - 1) if n % 2 == 0 else n  # 每队与所有其他队各赛一场所需轮次
     bye_team = None
     working = list(teams)
     if len(working) % 2 == 1:
@@ -242,17 +241,15 @@ def roundrobin_pairing(t_id, round_no):
             if not team.had_bye: bye_team = team; break
         if bye_team is None: bye_team = working[-1]
         working = [t for t in working if t.id != bye_team.id]
-    result = _backtrack_pair(working, round_no, total_r, set(), [], 0)
+    result = _backtrack_pair(working, round_no, 9999, set(), [], 0)
     if result is None:
         result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
     return result, bye_team
 
 def group_roundrobin_pairing(t_id, round_no, group_id):
-    """小组纯粹轮流循环赛：组内按固定顺序避免重复对阵，不按积分排序"""
+    """小组纯粹轮流循环赛：组内按固定顺序避免重复对阵，不按积分排序。"""
     teams = Team.query.filter_by(tournament_id=t_id, group_id=group_id).all()
     teams.sort(key=lambda x: x.id)
-    n = len(teams)
-    total_r = (n - 1) if n % 2 == 0 else n
     bye_team = None
     working = list(teams)
     if len(working) % 2 == 1:
@@ -260,7 +257,7 @@ def group_roundrobin_pairing(t_id, round_no, group_id):
             if not team.had_bye: bye_team = team; break
         if bye_team is None: bye_team = working[-1]
         working = [t for t in working if t.id != bye_team.id]
-    result = _backtrack_pair(working, round_no, total_r, set(), [], 0)
+    result = _backtrack_pair(working, round_no, 9999, set(), [], 0)
     if result is None:
         result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
     return result, bye_team
