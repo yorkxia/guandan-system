@@ -59,6 +59,7 @@ class SystemConfig(db.Model):
     num_groups = db.Column(db.Integer, default=0)       # 分几组
     advance_per_group = db.Column(db.Integer, default=0)# 每组出线名额
     stage = db.Column(db.String(20), default=None)      # 'group' | 'finals' | None
+    pairing_mode = db.Column(db.String(20), default='swiss')  # 'swiss' | 'roundrobin'
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -225,6 +226,42 @@ def swiss_pairing(t_id, round_no):
     result = _backtrack_pair(working, round_no, total_r, set(), [], 0)
     if result is None:
         # 极端兜底：顺序强制配对
+        result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
+    return result, bye_team
+
+def roundrobin_pairing(t_id, round_no):
+    """纯粹轮流循环赛：按固定顺序避免重复对阵，不按积分排序"""
+    teams = Team.query.filter_by(tournament_id=t_id).all()
+    teams.sort(key=lambda x: x.id)
+    n = len(teams)
+    total_r = (n - 1) if n % 2 == 0 else n  # 每队与所有其他队各赛一场所需轮次
+    bye_team = None
+    working = list(teams)
+    if len(working) % 2 == 1:
+        for team in reversed(working):
+            if not team.had_bye: bye_team = team; break
+        if bye_team is None: bye_team = working[-1]
+        working = [t for t in working if t.id != bye_team.id]
+    result = _backtrack_pair(working, round_no, total_r, set(), [], 0)
+    if result is None:
+        result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
+    return result, bye_team
+
+def group_roundrobin_pairing(t_id, round_no, group_id):
+    """小组纯粹轮流循环赛：组内按固定顺序避免重复对阵，不按积分排序"""
+    teams = Team.query.filter_by(tournament_id=t_id, group_id=group_id).all()
+    teams.sort(key=lambda x: x.id)
+    n = len(teams)
+    total_r = (n - 1) if n % 2 == 0 else n
+    bye_team = None
+    working = list(teams)
+    if len(working) % 2 == 1:
+        for team in reversed(working):
+            if not team.had_bye: bye_team = team; break
+        if bye_team is None: bye_team = working[-1]
+        working = [t for t in working if t.id != bye_team.id]
+    result = _backtrack_pair(working, round_no, total_r, set(), [], 0)
+    if result is None:
         result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
     return result, bye_team
 
@@ -644,7 +681,7 @@ def setup():
         <label style="display:block;cursor:pointer;padding:16px;border-radius:10px;border:2px solid rgba(6,182,212,0.3);margin-bottom:12px;background:rgba(6,182,212,0.05);" onclick="selectMode(1)">
           <input type="radio" name="formatMode" id="mode1" value="1" style="width:18px;height:18px;vertical-align:middle;margin-right:10px;accent-color:#06b6d4;">
           <span style="font-size:1.1rem;font-weight:700;">🔄 不分组 · 直接随机循环赛</span>
-          <div style="color:#94a3b8;font-size:0.85rem;margin-top:6px;margin-left:28px;">所有队伍直接进入瑞士制循环赛（原有功能不变）</div>
+          <div style="color:#94a3b8;font-size:0.85rem;margin-top:6px;margin-left:28px;">所有队伍直接进入循环赛</div>
         </label>
 
         <!-- 选项2 -->
@@ -653,6 +690,22 @@ def setup():
           <span style="font-size:1.1rem;font-weight:700;color:#fbbf24;">🏆 分小组赛</span>
           <div style="color:#94a3b8;font-size:0.85rem;margin-top:6px;margin-left:28px;">先小组循环赛，各组前几名再参加决赛循环赛</div>
         </label>
+
+        <!-- 配对方式选择（选择任意赛制后显示）-->
+        <div id="pairingTypeSection" style="display:none;padding:14px 16px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);margin-bottom:12px;">
+          <div style="font-size:0.88rem;color:#94a3b8;margin-bottom:10px;font-weight:600;">⚙️ 配对方式</div>
+          <div style="display:flex;gap:24px;flex-wrap:wrap;">
+            <label style="cursor:pointer;color:#f1f5f9;font-size:0.95rem;display:flex;align-items:center;gap:6px;" onclick="event.stopPropagation()">
+              <input type="radio" name="pairingType" id="pt_swiss" value="swiss" checked style="accent-color:#06b6d4;width:16px;height:16px;">
+              🎯 瑞士制循环赛
+            </label>
+            <label style="cursor:pointer;color:#f1f5f9;font-size:0.95rem;display:flex;align-items:center;gap:6px;" onclick="event.stopPropagation()">
+              <input type="radio" name="pairingType" id="pt_rr" value="roundrobin" style="accent-color:#06b6d4;width:16px;height:16px;">
+              🔁 纯粹轮流循环赛
+            </label>
+          </div>
+          <div style="font-size:0.78rem;color:#64748b;margin-top:8px;">瑞士制：按积分高低配对 &nbsp;|&nbsp; 纯粹轮流：每队依次与所有其他队各赛一场，不按积分配对</div>
+        </div>
 
         <!-- 分小组赛配置（默认隐藏） -->
         <div id="groupConfig" style="display:none;padding:16px;border-radius:10px;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);margin-bottom:12px;">
@@ -696,6 +749,7 @@ function selectMode(m){{
   l2.style.borderColor=m===2?'#fbbf24':'rgba(251,191,36,0.3)';
   l2.style.background=m===2?'rgba(251,191,36,0.12)':'rgba(251,191,36,0.05)';
   document.getElementById('groupConfig').style.display=m===2?'block':'none';
+  document.getElementById('pairingTypeSection').style.display='block';
   if(m===1){{
     var btn=document.getElementById('confirmBtn');
     btn.disabled=false;btn.style.background='linear-gradient(135deg,#0ea5e9,#06b6d4)';
@@ -703,6 +757,11 @@ function selectMode(m){{
   }} else {{
     validateGroups();
   }}
+}}
+
+function getPairingMode(){{
+  var el=document.querySelector('input[name="pairingType"]:checked');
+  return el?el.value:'swiss';
 }}
 
 function validateGroups(){{
@@ -724,8 +783,12 @@ function validateGroups(){{
 }}
 
 function doConfirm(){{
+  var pm=getPairingMode();
   if(selectedMode===1){{
-    window.location.href='/init_game';
+    var form=document.createElement('form');
+    form.method='POST';form.action='/init_game';
+    var fp=document.createElement('input');fp.type='hidden';fp.name='pairing_mode';fp.value=pm;
+    form.appendChild(fp);document.body.appendChild(form);form.submit();
   }} else if(selectedMode===2){{
     var g=document.getElementById('num_groups').value;
     var a=document.getElementById('adv_pg').value;
@@ -733,7 +796,8 @@ function doConfirm(){{
     form.method='POST';form.action='/init_game_group';
     var f1=document.createElement('input');f1.type='hidden';f1.name='num_groups';f1.value=g;
     var f2=document.createElement('input');f2.type='hidden';f2.name='advance_per_group';f2.value=a;
-    form.appendChild(f1);form.appendChild(f2);
+    var fp=document.createElement('input');fp.type='hidden';fp.name='pairing_mode';fp.value=pm;
+    form.appendChild(f1);form.appendChild(f2);form.appendChild(fp);
     document.body.appendChild(form);form.submit();
   }}
 }}
@@ -830,12 +894,13 @@ def create_new_tournament():
         db.session.add(new_t); db.session.commit(); log_act("Create Tournament", f"Name: {new_name}", new_t.id)
     return redirect(url_for('setup'))
 
-@app.route('/init_game')
+@app.route('/init_game', methods=['GET', 'POST'])
 def init_game():
     t = get_active_t()
     if not t: return redirect(url_for('setup'))
     conf = get_config(t.id)
     conf.current_round = 1; conf.mode = 0; conf.stage = None; conf.num_groups = 0; conf.advance_per_group = 0
+    conf.pairing_mode = request.form.get('pairing_mode', request.args.get('pairing_mode', 'swiss'))
     Match.query.filter_by(tournament_id=t.id).delete()
     ts = Team.query.filter_by(tournament_id=t.id).all()
     if len(ts) < 2: return "Not enough teams"
@@ -882,6 +947,7 @@ def init_game_group():
     conf.num_groups = num_groups
     conf.advance_per_group = advance_per_group
     conf.stage = 'group'
+    conf.pairing_mode = request.form.get('pairing_mode', 'swiss')
     Match.query.filter_by(tournament_id=t.id).delete()
     for team in ts:
         team.seat_ns_count = 0; team.seat_ew_count = 0; team.had_bye = False
@@ -2147,10 +2213,13 @@ def next_r():
     conf = get_config(t.id)
     conf.current_round += 1
     if conf.mode == 1 and conf.stage == 'group':
-        # 小组赛模式：对每个小组分别进行瑞士制配对
+        # 小组赛模式：按配对方式对每个小组分别配对
         table_counter = 1
         for g in range(1, conf.num_groups + 1):
-            pairs, bye_team = group_swiss_pairing(t.id, conf.current_round, g)
+            if (conf.pairing_mode or 'swiss') == 'roundrobin':
+                pairs, bye_team = group_roundrobin_pairing(t.id, conf.current_round, g)
+            else:
+                pairs, bye_team = group_swiss_pairing(t.id, conf.current_round, g)
             if bye_team:
                 bye_team.had_bye = True; bye_team.current_score += 3
                 log_act("Bye Round", f"Group {g} R{conf.current_round} bye: {bye_team.name}", t.id)
@@ -2196,7 +2265,12 @@ def next_r():
                                      group_id=0, **seats))
             log_act("Next Round (Finals)", f"Round {conf.current_round}", t.id)
         else:
-            pairs, bye_team = swiss_pairing(t.id, conf.current_round)
+            if (conf.pairing_mode or 'swiss') == 'roundrobin':
+                pairs, bye_team = roundrobin_pairing(t.id, conf.current_round)
+                mode_label = "Round-Robin"
+            else:
+                pairs, bye_team = swiss_pairing(t.id, conf.current_round)
+                mode_label = "Swiss V2"
             if bye_team:
                 bye_team.had_bye = True; bye_team.current_score += 3
                 log_act("Bye Round", f"Round {conf.current_round} bye: {bye_team.name} (+3 win pts)", t.id)
@@ -2208,7 +2282,7 @@ def next_r():
                 db.session.add(Match(tournament_id=t.id, round_no=conf.current_round, table_no=i+1,
                                      team_a_id=t1.id, team_b_id=t2.id,
                                      team_a_name=t1.name, team_b_name=t2.name, **seats))
-            log_act("Next Round", f"Round {conf.current_round} (Swiss V2)", t.id)
+            log_act("Next Round", f"Round {conf.current_round} ({mode_label})", t.id)
     db.session.commit()
     return redirect(url_for('matches'))
 
@@ -2241,6 +2315,8 @@ def init_db():
         try: db.session.execute(text("ALTER TABLE system_config ADD COLUMN advance_per_group INTEGER DEFAULT 0")); db.session.commit()
         except Exception: db.session.rollback()
         try: db.session.execute(text("ALTER TABLE system_config ADD COLUMN stage VARCHAR(20)")); db.session.commit()
+        except Exception: db.session.rollback()
+        try: db.session.execute(text("ALTER TABLE system_config ADD COLUMN pairing_mode VARCHAR(20) DEFAULT 'swiss'")); db.session.commit()
         except Exception: db.session.rollback()
         try: db.session.execute(text("ALTER TABLE team ADD COLUMN group_id INTEGER DEFAULT 0")); db.session.commit()
         except Exception: db.session.rollback()
