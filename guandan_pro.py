@@ -1213,6 +1213,20 @@ def matches():
           </div>
           <div class="modal-footer border-0 p-4">
             <form action="/confirm_finals" method="post" class="w-100">
+              <div style="padding:14px 16px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);margin-bottom:16px;">
+                <div style="font-size:0.88rem;color:#94a3b8;margin-bottom:10px;font-weight:600;">⚙️ {T('决赛配对方式','Finals Pairing Mode')}</div>
+                <div style="display:flex;gap:24px;flex-wrap:wrap;">
+                  <label style="cursor:pointer;color:#f1f5f9;font-size:0.95rem;display:flex;align-items:center;gap:6px;">
+                    <input type="radio" name="pairing_mode" value="swiss" checked style="accent-color:#06b6d4;width:16px;height:16px;">
+                    🎯 {T('瑞士制循环赛','Swiss System')}
+                  </label>
+                  <label style="cursor:pointer;color:#f1f5f9;font-size:0.95rem;display:flex;align-items:center;gap:6px;">
+                    <input type="radio" name="pairing_mode" value="roundrobin" style="accent-color:#06b6d4;width:16px;height:16px;">
+                    🔁 {T('纯粹轮流循环赛','Pure Round Robin')}
+                  </label>
+                </div>
+                <div style="font-size:0.78rem;color:#64748b;margin-top:8px;">{T('瑞士制：按积分高低配对','Swiss: paired by score')} &nbsp;|&nbsp; {T('纯粹轮流：每队依次与所有其他队各赛一场','Round Robin: each team plays every other team in order')}</div>
+              </div>
               <button type="submit" class="btn btn-warning w-100 py-3 fw-bold fs-5 rounded-pill shadow">✅ {T('确认出线赛队，并且开始决赛循环赛编排','Confirm Finalists & Start Finals Draw')}</button>
             </form>
           </div>
@@ -2203,28 +2217,42 @@ def confirm_finals():
         q.current_score = 0; q.round_score = 0
         q.history_opponents = ""; q.had_bye = False
         q.seat_ns_count = 0; q.seat_ew_count = 0
+    pairing_mode = request.form.get('pairing_mode', 'swiss')
     conf.stage = 'finals'
     conf.current_round = 1
+    conf.pairing_mode = pairing_mode
     db.session.flush()
-    # 生成决赛第一轮（仅晋级队，使用普通 swiss pairing）
-    random.shuffle(qualifiers)
+    # 生成决赛第一轮
     bye_team = None
     working = list(qualifiers)
-    if len(working) % 2 == 1:
-        bye_team = working[-1]; working = working[:-1]
+    if pairing_mode == 'roundrobin':
+        working.sort(key=lambda x: x.id)
+        if len(working) % 2 == 1:
+            for team in reversed(working):
+                if not team.had_bye: bye_team = team; break
+            if bye_team is None: bye_team = working[-1]
+            working = [tm for tm in working if tm.id != bye_team.id]
+        result = _backtrack_no_rematch(working, set(), [], 0)
+        if result is None:
+            result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
+    else:
+        random.shuffle(working)
+        if len(working) % 2 == 1:
+            bye_team = working[-1]; working = working[:-1]
+        result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
+    if bye_team:
         bye_team.had_bye = True; bye_team.current_score += 3
         log_act("Bye Round", f"Finals R1 bye: {bye_team.name} (+3)", t.id)
-    for i in range(0, len(working)-1, 2):
-        t1, t2 = working[i], working[i+1]
+    for i, (t1, t2) in enumerate(result):
         p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
         p2 = [x.strip() for x in t2.players.replace('，',',').split(',')]
         is_6p = len(p1) >= 3 and len(p2) >= 3
         seats = assign_seats(t1, t2, p1, p2, is_6p)
-        db.session.add(Match(tournament_id=t.id, round_no=1, table_no=i//2+1,
+        db.session.add(Match(tournament_id=t.id, round_no=1, table_no=i+1,
                              team_a_id=t1.id, team_b_id=t2.id,
                              team_a_name=t1.name, team_b_name=t2.name,
                              group_id=0, **seats))
-    log_act("Start Finals", f"{len(qualifiers)}支队伍参加决赛循环赛", t.id)
+    log_act("Start Finals", f"{len(qualifiers)}支队伍参加决赛循环赛 ({pairing_mode})", t.id)
     db.session.commit()
     return redirect(url_for('matches'))
 
@@ -2261,20 +2289,33 @@ def next_r():
             # 决赛只对晋级队配对
             finalist_ids = [tm.id for tm in Team.query.filter_by(tournament_id=t.id, is_finalist=True).all()]
             teams = Team.query.filter(Team.id.in_(finalist_ids)).all()
-            teams.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
-            total_r = conf.total_rounds
             bye_team = None
             working = list(teams)
-            if len(working) % 2 == 1:
-                for team in reversed(working):
-                    if not team.had_bye: bye_team = team; break
-                if bye_team is None: bye_team = working[-1]
-                working = [tm for tm in working if tm.id != bye_team.id]
+            if (conf.pairing_mode or 'swiss') == 'roundrobin':
+                working.sort(key=lambda x: x.id)
+                if len(working) % 2 == 1:
+                    for team in reversed(working):
+                        if not team.had_bye: bye_team = team; break
+                    if bye_team is None: bye_team = working[-1]
+                    working = [tm for tm in working if tm.id != bye_team.id]
+                result = _backtrack_no_rematch(working, set(), [], 0)
+                if result is None:
+                    result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
+            else:
+                teams.sort(key=lambda x: (x.current_score, x.round_score), reverse=True)
+                working = list(teams)
+                total_r = conf.total_rounds
+                if len(working) % 2 == 1:
+                    for team in reversed(working):
+                        if not team.had_bye: bye_team = team; break
+                    if bye_team is None: bye_team = working[-1]
+                    working = [tm for tm in working if tm.id != bye_team.id]
+                result = _backtrack_pair(working, conf.current_round, total_r, set(), [], 0)
+                if result is None:
+                    result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
+            if bye_team:
                 bye_team.had_bye = True; bye_team.current_score += 3
                 log_act("Bye Round", f"Finals R{conf.current_round} bye: {bye_team.name}", t.id)
-            result = _backtrack_pair(working, conf.current_round, total_r, set(), [], 0)
-            if result is None:
-                result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
             for i, (t1, t2) in enumerate(result):
                 p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
                 p2 = [x.strip() for x in t2.players.replace('，',',').split(',')]
