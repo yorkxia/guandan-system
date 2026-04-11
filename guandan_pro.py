@@ -1762,26 +1762,84 @@ def export_grouping():
     t = get_active_t()
     if not t: return "No active tournament"
     conf = get_config(t.id)
-    ms_sorted = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).order_by(Match.table_no).all()
     team_map = {team.id: team for team in Team.query.filter_by(tournament_id=t.id).all()}
-    export_data = []
-    for m in ms_sorted:
-        ta = team_map.get(m.team_a_id)
-        tb = team_map.get(m.team_b_id)
-        export_data.append({
-            "桌号": m.table_no,
-            "队伍A": m.team_a_name,
-            "队伍A选手": ta.players if ta else "",
-            "队伍B": m.team_b_name,
-            "队伍B选手": tb.players if tb else "",
-        })
-    df = pd.DataFrame(export_data)
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name=f"第{conf.current_round}轮分组")
-    output.seek(0)
-    log_act("Export Grouping", f"Round {conf.current_round} grouping exported.", t.id)
-    return send_file(output, as_attachment=True, download_name=f"分组信息_第{conf.current_round}轮_{t.name}.xlsx")
+
+    if conf.mode == 1 and conf.stage == 'finals':
+        # ===== 决赛循环赛：按轮次分 Sheet，导出全部轮对阵信息 =====
+        finalist_ids = {tid for tid, tm in team_map.items() if tm.is_finalist}
+        all_finals_matches = (Match.query
+                              .filter_by(tournament_id=t.id)
+                              .filter(Match.group_id == 0)
+                              .order_by(Match.round_no, Match.table_no)
+                              .all())
+        # 按轮次分组（只保留双方均为决赛队的对阵）
+        rounds = {}
+        for m in all_finals_matches:
+            if m.team_a_id in finalist_ids and m.team_b_id in finalist_ids:
+                rounds.setdefault(m.round_no, []).append(m)
+
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for rnd in sorted(rounds.keys()):
+                matches = rounds[rnd]
+                # 以本轮第一场判断 4人/6人模式
+                is_6p = bool(matches[0].pos_p5 and matches[0].pos_p6) if matches else False
+                export_data = []
+                for m in matches:
+                    ta = team_map.get(m.team_a_id)
+                    tb = team_map.get(m.team_b_id)
+                    if is_6p:
+                        row = {
+                            "桌号": m.table_no,
+                            "队伍A": m.team_a_name,
+                            "队伍A选手": ta.players if ta else "",
+                            "队伍B": m.team_b_name,
+                            "队伍B选手": tb.players if tb else "",
+                            "① 北": m.pos_north or "",
+                            "②": m.pos_p5 or "",
+                            "③ 东": m.pos_east or "",
+                            "④ 南": m.pos_south or "",
+                            "⑤": m.pos_p6 or "",
+                            "⑥ 西": m.pos_west or "",
+                        }
+                    else:
+                        row = {
+                            "桌号": m.table_no,
+                            "队伍A": m.team_a_name,
+                            "队伍A选手": ta.players if ta else "",
+                            "队伍B": m.team_b_name,
+                            "队伍B选手": tb.players if tb else "",
+                            "北(N)": m.pos_north or "",
+                            "东(E)": m.pos_east or "",
+                            "南(S)": m.pos_south or "",
+                            "西(W)": m.pos_west or "",
+                        }
+                    export_data.append(row)
+                pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name=f"决赛第{rnd}轮")
+
+        output.seek(0)
+        log_act("Export Grouping", f"Finals all rounds grouping exported ({len(rounds)} rounds).", t.id)
+        return send_file(output, as_attachment=True, download_name=f"决赛对阵信息_{t.name}.xlsx")
+
+    else:
+        # ===== 普通/小组赛模式：仅导出当前轮 =====
+        ms_sorted = Match.query.filter_by(tournament_id=t.id, round_no=conf.current_round).order_by(Match.table_no).all()
+        export_data = []
+        for m in ms_sorted:
+            ta = team_map.get(m.team_a_id)
+            tb = team_map.get(m.team_b_id)
+            export_data.append({
+                "桌号": m.table_no,
+                "队伍A": m.team_a_name,
+                "队伍A选手": ta.players if ta else "",
+                "队伍B": m.team_b_name,
+                "队伍B选手": tb.players if tb else "",
+            })
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name=f"第{conf.current_round}轮分组")
+        output.seek(0)
+        log_act("Export Grouping", f"Round {conf.current_round} grouping exported.", t.id)
+        return send_file(output, as_attachment=True, download_name=f"分组信息_第{conf.current_round}轮_{t.name}.xlsx")
 
 @app.route('/export_group_matches')
 def export_group_matches():
