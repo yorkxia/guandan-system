@@ -937,8 +937,8 @@ def init_game():
         bye_team = working[-1]
         working = working[:-1]
         bye_team.had_bye = True
-        bye_team.current_score += 3
-        log_act("Bye Round", f"Round 1 bye: {bye_team.name} (+3 win pts)", t.id)
+        bye_team.current_score += 2
+        log_act("Bye Round", f"Round 1 bye: {bye_team.name} (+2 win pts)", t.id)
     for i in range(0, len(working)-1, 2):
         t1, t2 = working[i], working[i+1]
         p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
@@ -985,8 +985,8 @@ def init_game_group():
         working = list(group_teams)
         if len(working) % 2 == 1:
             bye_team = working[-1]; working = working[:-1]
-            bye_team.had_bye = True; bye_team.current_score += 3
-            log_act("Bye Round", f"Group {g} R1 bye: {bye_team.name} (+3)", t.id)
+            bye_team.had_bye = True; bye_team.current_score += 2
+            log_act("Bye Round", f"Group {g} R1 bye: {bye_team.name} (+2)", t.id)
         for i in range(0, len(working)-1, 2):
             t1, t2 = working[i], working[i+1]
             p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
@@ -1897,8 +1897,8 @@ def save(mid):
     m.score_a = sa; m.score_b = sb 
     
     t1.round_score += sa; t2.round_score += sb
-    if sa > sb: t1.current_score += 3
-    elif sb > sa: t2.current_score += 3
+    if sa > sb: t1.current_score += 2
+    elif sb > sa: t2.current_score += 2
     else: t1.current_score += 1; t2.current_score += 1
     
     m.is_completed = True
@@ -1975,7 +1975,7 @@ def leaderboard():
             for (my_id, my_s, op_s) in [(m.team_a_id, m.score_a, m.score_b), (m.team_b_id, m.score_b, m.score_a)]:
                 if my_s < 0: continue
                 gs_win.setdefault(my_id, 0); gs_round.setdefault(my_id, 0)
-                if my_s > op_s: gs_win[my_id] += 3
+                if my_s > op_s: gs_win[my_id] += 2
                 elif my_s == op_s: gs_win[my_id] += 1
                 gs_round[my_id] += my_s
         group_tables = '<div class="mt-4"><small class="text-white-50 d-block mb-2">📋 小组赛成绩存档：</small>'
@@ -2094,7 +2094,7 @@ def export_excel():
                     is_a = m.team_a_id == team.id
                     my_s = m.score_a if is_a else m.score_b
                     op_s = m.score_b if is_a else m.score_a
-                    wp = 3 if my_s > op_s else (1 if my_s == op_s else 0)
+                    wp = 2 if my_s > op_s else (1 if my_s == op_s else 0)
                     win_s += wp; rnd_s += my_s
                     row[f"第{m.round_no}轮 胜分"] = wp
                     row[f"第{m.round_no}轮 级分"] = my_s
@@ -2115,7 +2115,7 @@ def export_excel():
                 is_a = m.team_a_id == team.id
                 my_s = m.score_a if is_a else m.score_b
                 op_s = m.score_b if is_a else m.score_a
-                wp = 3 if my_s > op_s else (1 if my_s == op_s else 0)
+                wp = 2 if my_s > op_s else (1 if my_s == op_s else 0)
                 row[f"决赛第{m.round_no}轮 胜分"] = wp
                 row[f"决赛第{m.round_no}轮 级分"] = my_s
             finals_data.append(row)
@@ -2137,7 +2137,7 @@ def export_excel():
                 is_a = m.team_a_id == team.id
                 my_s = m.score_a if is_a else m.score_b
                 op_s = m.score_b if is_a else m.score_a
-                wp = 3 if my_s > op_s else (1 if my_s == op_s else 0)
+                wp = 2 if my_s > op_s else (1 if my_s == op_s else 0)
                 row[f"第{m.round_no}轮 胜分"] = wp
                 row[f"第{m.round_no}轮 级分"] = my_s
             export_data.append(row)
@@ -2299,8 +2299,8 @@ def confirm_finals():
             bye_team = working[-1]; working = working[:-1]
         result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
     if bye_team:
-        bye_team.had_bye = True; bye_team.current_score += 3
-        log_act("Bye Round", f"Finals R1 bye: {bye_team.name} (+3)", t.id)
+        bye_team.had_bye = True; bye_team.current_score += 2
+        log_act("Bye Round", f"Finals R1 bye: {bye_team.name} (+2)", t.id)
     for i, (t1, t2) in enumerate(result):
         p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
         p2 = [x.strip() for x in t2.players.replace('，',',').split(',')]
@@ -2328,7 +2328,7 @@ def next_r():
             else:
                 pairs, bye_team = group_swiss_pairing(t.id, conf.current_round, g)
             if bye_team:
-                bye_team.had_bye = True; bye_team.current_score += 3
+                bye_team.had_bye = True; bye_team.current_score += 2
                 log_act("Bye Round", f"Group {g} R{conf.current_round} bye: {bye_team.name}", t.id)
             for t1, t2 in pairs:
                 p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
@@ -2372,7 +2372,7 @@ def next_r():
                 if result is None:
                     result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
             if bye_team:
-                bye_team.had_bye = True; bye_team.current_score += 3
+                bye_team.had_bye = True; bye_team.current_score += 2
                 log_act("Bye Round", f"Finals R{conf.current_round} bye: {bye_team.name}", t.id)
             for i, (t1, t2) in enumerate(result):
                 p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
@@ -2392,8 +2392,8 @@ def next_r():
                 pairs, bye_team = swiss_pairing(t.id, conf.current_round)
                 mode_label = "Swiss V2"
             if bye_team:
-                bye_team.had_bye = True; bye_team.current_score += 3
-                log_act("Bye Round", f"Round {conf.current_round} bye: {bye_team.name} (+3 win pts)", t.id)
+                bye_team.had_bye = True; bye_team.current_score += 2
+                log_act("Bye Round", f"Round {conf.current_round} bye: {bye_team.name} (+2 win pts)", t.id)
             for i, (t1, t2) in enumerate(pairs):
                 p1 = [x.strip() for x in t1.players.replace('，',',').split(',')]
                 p2 = [x.strip() for x in t2.players.replace('，',',').split(',')]
