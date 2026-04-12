@@ -1097,6 +1097,54 @@ def matches():
                   f'<button onclick="startTimer()" class="btn btn-info px-4 fw-bold rounded-pill">{T("开始","Start")}</button>'
                   f'<button id="pause-btn" onclick="togglePause()" class="btn btn-outline-warning px-4 fw-bold rounded-pill">{T("暂停","Pause")}</button>'
                   f'<button id="zoom-btn" onclick="toggleClock()" class="btn btn-outline-light px-3 fw-bold rounded-pill" style="font-size:0.85rem;">⤢ 放大时钟</button></div>')
+    _m_info_bar = (
+        f'<div class="container-fluid px-5 mt-1 mb-3" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">'
+        f'<div style="color:rgba(255,255,255,0.7);font-size:0.95rem;">'
+        f'<span style="color:#FBBF24;font-weight:800;font-size:1.05rem;">🏆 {t.name}</span>'
+        f'&nbsp;&nbsp;|&nbsp;&nbsp;第&nbsp;<span style="color:#60A5FA;font-weight:700;">{conf.current_round}</span>&nbsp;轮'
+        f'</div>'
+        f'<button onclick="showQRModal()" style="background:linear-gradient(135deg,#10b981,#059669);border:none;color:#fff;padding:9px 22px;border-radius:50px;font-weight:700;cursor:pointer;font-size:0.9rem;white-space:nowrap;box-shadow:0 2px 12px rgba(16,185,129,0.4);">📱 生成录入成绩二维码</button>'
+        f'</div>'
+    )
+    _m_qr_modal = (
+        f'<div class="modal fade" id="qrModal" tabindex="-1">'
+        f'<div class="modal-dialog modal-dialog-centered">'
+        f'<div class="modal-content bg-dark text-white border-success shadow-lg">'
+        f'<div class="modal-header border-success">'
+        f'<h5 class="modal-title fw-bold" style="color:#10b981;">📱 成绩录入二维码</h5>'
+        f'<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>'
+        f'</div>'
+        f'<div class="modal-body text-center p-4">'
+        f'<p class="mb-1" style="color:rgba(255,255,255,0.6);font-size:0.9rem;">赛友扫码进入&nbsp;<strong style="color:#60A5FA;">第 {conf.current_round} 轮</strong>&nbsp;成绩录入</p>'
+        f'<p class="mb-3" style="color:rgba(255,255,255,0.35);font-size:0.78rem;">本二维码为赛事唯一码，始终对应当前轮次，可随时扫码</p>'
+        f'<div id="qr-container" style="display:inline-block;background:#fff;padding:16px;border-radius:12px;margin-bottom:10px;min-height:272px;min-width:272px;"></div>'
+        f'<p style="font-size:0.72rem;color:rgba(255,255,255,0.3);word-break:break-all;margin:6px 0 0;" id="qr-url-text"></p>'
+        f'</div>'
+        f'<div class="modal-footer border-0 pt-0 pb-3">'
+        f'<button onclick="downloadQR()" class="btn w-100 fw-bold py-2" style="background:linear-gradient(135deg,#10b981,#059669);border:none;color:#fff;">⬇️ 下载二维码图片</button>'
+        f'</div>'
+        f'</div></div></div>'
+        f'<script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>'
+        f'<script>'
+        f'var _qrGen=false;'
+        f'function showQRModal(){{'
+        f'  new bootstrap.Modal(document.getElementById("qrModal")).show();'
+        f'  if(!_qrGen){{'
+        f'    var url=window.location.origin+"/mobile/{t.id}";'
+        f'    new QRCode(document.getElementById("qr-container"),{{text:url,width:240,height:240,colorDark:"#000000",colorLight:"#ffffff",correctLevel:QRCode.CorrectLevel.H}});'
+        f'    document.getElementById("qr-url-text").textContent=url;'
+        f'    _qrGen=true;'
+        f'  }}'
+        f'}}'
+        f'function downloadQR(){{'
+        f'  var c=document.querySelector("#qr-container canvas");'
+        f'  var a=document.createElement("a");'
+        f'  if(c){{a.href=c.toDataURL("image/png");}}else{{var img=document.querySelector("#qr-container img");if(img)a.href=img.src;else return;}}'
+        f'  a.download="guandan-score-qr.png";a.click();'
+        f'}}'
+        f'</script>'
+    )
+    timer_html = timer_html + _m_info_bar + _m_qr_modal
 
     if conf.mode == 1 and conf.stage == 'group':
         # ===== 小组赛：按组分块显示（同积分榜模式）=====
@@ -1958,6 +2006,8 @@ def mobile_table(tid, mid):
                 db.session.add(MobilePending(match_id=mid, score_a=sa, score_b=sb,
                                              submitted_at=datetime.now().strftime('%Y-%m-%d %H:%M')))
                 db.session.commit()
+                # 标记提交方：该浏览器/手机已提交，不能再看到"确认"按钮
+                session[f'mobile_sub_{mid}'] = True
             except Exception:
                 db.session.rollback()
         return redirect(url_for('mobile_table', tid=tid, mid=mid))
@@ -1965,8 +2015,12 @@ def mobile_table(tid, mid):
     conf = SystemConfig.query.filter_by(tournament_id=tid).first()
     pending = MobilePending.query.filter_by(match_id=mid).first()
     round_label = f'第 {conf.current_round} 轮' if conf else ''
+    # 判断当前设备是否为提交方（session 标记）
+    i_submitted = session.get(f'mobile_sub_{mid}', False)
 
     if m.is_completed:
+        # 成绩已最终确认，清除 session 标记
+        session.pop(f'mobile_sub_{mid}', None)
         card_html = _mobile_match_card(m, 'done')
         action_html = (
             f'<div style="background:rgba(239,68,68,0.1);border:1.5px solid #ef4444;border-radius:14px;padding:22px 16px;text-align:center;">'
@@ -1981,7 +2035,24 @@ def mobile_table(tid, mid):
             f'该成绩已经被录入，如有疑问，请联系赛事主办方'
             f'</div>'
         )
+    elif pending and i_submitted:
+        # 当前设备是提交方 → 只显示"等待对手确认"，无确认按钮
+        card_html = _mobile_match_card(m, 'pending')
+        action_html = (
+            f'<div style="background:rgba(59,130,246,0.08);border:1.5px solid #3b82f6;border-radius:14px;padding:24px 16px;text-align:center;">'
+            f'<div style="font-size:1.5rem;margin-bottom:10px;">⏳</div>'
+            f'<div style="font-size:1.1rem;font-weight:800;color:#60A5FA;margin-bottom:10px;">等待对手确认</div>'
+            f'<div style="font-size:1rem;font-weight:800;">'
+            f'<span style="color:#60A5FA;">{m.team_a_name}</span>'
+            f'&nbsp;<span style="color:#FBBF24;font-size:1.8rem;font-weight:900;margin:0 10px;">{pending.score_a}&nbsp;:&nbsp;{pending.score_b}</span>'
+            f'<span style="color:#FB923C;">{m.team_b_name}</span>'
+            f'</div>'
+            f'<div style="font-size:0.72rem;color:rgba(255,255,255,0.3);margin-top:10px;">成绩已提交，请对手扫描同一二维码进入此桌确认</div>'
+            f'<div style="font-size:0.68rem;color:rgba(255,255,255,0.2);margin-top:6px;">录入时间：{pending.submitted_at}</div>'
+            f'</div>'
+        )
     elif pending:
+        # 当前设备是对手 → 显示"确认成绩"按钮
         card_html = _mobile_match_card(m, 'pending')
         action_html = (
             f'<div style="background:rgba(251,191,36,0.08);border:1.5px solid #FBBF24;border-radius:14px;padding:20px 16px;text-align:center;margin-bottom:16px;">'
