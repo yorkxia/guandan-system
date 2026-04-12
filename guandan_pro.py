@@ -408,6 +408,10 @@ def render_layout(content, active="", is_login=False, hide_nav=False):
             fiveMinAlertDone = false;
             stopBgMusic();
             updateTimerDisplay();
+            // 在用户点击"开始"时立即解锁音频播放权限（绕过浏览器 autoplay 限制）
+            var _unlock = new Audio('/static/kenny_g_going_home.mp3');
+            _unlock.volume = 0;
+            _unlock.play().then(function() {{ _unlock.pause(); _unlock.currentTime = 0; _unlock = null; }}).catch(function(){{}});
             timer = setInterval(() => {{
                 if(!isPaused) {{
                     if(timeLeft <= 0) {{ clearInterval(timer); stopBgMusic(); let td = document.getElementById('time-display'); if(td) {{ td.innerText = "FINISH"; td.style.color = "#ef4444"; }} }}
