@@ -110,11 +110,20 @@ class AuditLog(db.Model):
     action = db.Column(db.String(100))
     details = db.Column(db.Text)
 
+class MobilePending(db.Model):
+    """移动端二维码录入：一方录入后暂存，等待对方确认才写入正式成绩"""
+    __tablename__ = 'mobile_pending'
+    id = db.Column(db.Integer, primary_key=True)
+    match_id = db.Column(db.Integer, nullable=False, unique=True)
+    score_a = db.Column(db.Integer, nullable=False)
+    score_b = db.Column(db.Integer, nullable=False)
+    submitted_at = db.Column(db.String(30), default='')
+
 # --- 2. 核心拦截器与辅助逻辑 ---
 
 @app.before_request
 def check_frozen():
-    allowed = ['unlock', 'logout', 'login', 'static', 'panorama']
+    allowed = ['unlock', 'logout', 'login', 'static', 'panorama', 'mobile_entry', 'mobile_table', 'mobile_confirm']
     if request.endpoint and request.endpoint not in allowed:
         if session.get('frozen'):
             return redirect(url_for('unlock'))
@@ -1758,8 +1767,299 @@ def panorama():
                       f'<button onclick="startTimer()" class="btn btn-info px-4 fw-bold rounded-pill">开始 Start</button>'
                       f'<button id="pause-btn" onclick="togglePause()" class="btn btn-outline-warning px-4 fw-bold rounded-pill">暂停 Pause</button>'
                       f'<button id="zoom-btn" onclick="toggleClock()" class="btn btn-outline-light px-3 fw-bold rounded-pill" style="font-size:0.85rem;">⤢ 放大时钟</button></div>')
-    html = f'{marquee}<div class="container-fluid px-5 mt-2">{panorama_timer}</div>{cards_section}{grouping_box}<script>window.onload=function(){{initPanoramaDisplay();}};</script>'
+    _info_bar = (
+        f'<div class="container-fluid px-5 mt-1 mb-3" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">'
+        f'<div style="color:rgba(255,255,255,0.7);font-size:0.95rem;">'
+        f'<span style="color:#FBBF24;font-weight:800;font-size:1.05rem;">🏆 {t.name}</span>'
+        f'&nbsp;&nbsp;|&nbsp;&nbsp;第&nbsp;<span style="color:#60A5FA;font-weight:700;">{conf.current_round}</span>&nbsp;轮'
+        f'</div>'
+        f'<button onclick="showQRModal()" style="background:linear-gradient(135deg,#10b981,#059669);border:none;color:#fff;padding:9px 22px;border-radius:50px;font-weight:700;cursor:pointer;font-size:0.9rem;white-space:nowrap;box-shadow:0 2px 12px rgba(16,185,129,0.4);">📱 生成录入成绩二维码</button>'
+        f'</div>'
+    )
+    _qr_modal = (
+        f'<div class="modal fade" id="qrModal" tabindex="-1">'
+        f'<div class="modal-dialog modal-dialog-centered">'
+        f'<div class="modal-content bg-dark text-white border-success shadow-lg">'
+        f'<div class="modal-header border-success">'
+        f'<h5 class="modal-title fw-bold" style="color:#10b981;">📱 成绩录入二维码</h5>'
+        f'<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>'
+        f'</div>'
+        f'<div class="modal-body text-center p-4">'
+        f'<p class="mb-1" style="color:rgba(255,255,255,0.6);font-size:0.9rem;">赛友扫码进入&nbsp;<strong style="color:#60A5FA;">第 {conf.current_round} 轮</strong>&nbsp;成绩录入</p>'
+        f'<p class="mb-3" style="color:rgba(255,255,255,0.35);font-size:0.78rem;">本二维码为赛事唯一码，始终对应当前轮次，可随时扫码</p>'
+        f'<div id="qr-container" style="display:inline-block;background:#fff;padding:16px;border-radius:12px;margin-bottom:10px;min-height:272px;min-width:272px;"></div>'
+        f'<p style="font-size:0.72rem;color:rgba(255,255,255,0.3);word-break:break-all;margin:6px 0 0;" id="qr-url-text"></p>'
+        f'</div>'
+        f'<div class="modal-footer border-0 pt-0 pb-3">'
+        f'<button onclick="downloadQR()" class="btn w-100 fw-bold py-2" style="background:linear-gradient(135deg,#10b981,#059669);border:none;color:#fff;">⬇️ 下载二维码图片</button>'
+        f'</div>'
+        f'</div></div></div>'
+        f'<script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>'
+        f'<script>'
+        f'var _qrGen=false;'
+        f'function showQRModal(){{'
+        f'  new bootstrap.Modal(document.getElementById("qrModal")).show();'
+        f'  if(!_qrGen){{'
+        f'    var url=window.location.origin+"/mobile/{t.id}";'
+        f'    new QRCode(document.getElementById("qr-container"),{{text:url,width:240,height:240,colorDark:"#000000",colorLight:"#ffffff",correctLevel:QRCode.CorrectLevel.H}});'
+        f'    document.getElementById("qr-url-text").textContent=url;'
+        f'    _qrGen=true;'
+        f'  }}'
+        f'}}'
+        f'function downloadQR(){{'
+        f'  var c=document.querySelector("#qr-container canvas");'
+        f'  var a=document.createElement("a");'
+        f'  if(c){{a.href=c.toDataURL("image/png");}}else{{var img=document.querySelector("#qr-container img");if(img)a.href=img.src;else return;}}'
+        f'  a.download="guandan-score-qr.png";a.click();'
+        f'}}'
+        f'</script>'
+    )
+    html = f'{marquee}<div class="container-fluid px-5 mt-2">{panorama_timer}</div>{_info_bar}{_qr_modal}{cards_section}{grouping_box}<script>window.onload=function(){{initPanoramaDisplay();}};</script>'
     return render_layout(html, active="panorama", hide_nav=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 移动端成绩录入（二维码扫码，公开访问，无需登录）
+# ─────────────────────────────────────────────────────────────────────────────
+_MOBILE_CSS = (
+    "* { box-sizing: border-box; margin: 0; padding: 0; }"
+    "body { background: #0f172a; color: #fff; font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif; min-height: 100vh; }"
+    ".glass-card { background: rgba(30,41,59,0.7); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }"
+    ".seat-wrapper { position: relative; height: 210px; background: rgba(0,0,0,0.3); border-radius: 12px; border: 1px solid rgba(59,130,246,0.2); display: flex; align-items: center; justify-content: center; }"
+    ".seat-player { position: absolute; font-size: 1rem; font-weight: bold; white-space: nowrap; text-shadow: 1px 1px 2px #000; z-index: 10; background: rgba(15,23,42,0.8); padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(13,202,240,0.3); }"
+    ".pos-4-n { top: 10px; left: 50%; transform: translateX(-50%); }"
+    ".pos-4-s { bottom: 10px; left: 50%; transform: translateX(-50%); }"
+    ".pos-4-w { left: 10px; top: 50%; transform: translateY(-50%); }"
+    ".pos-4-e { right: 10px; top: 50%; transform: translateY(-50%); }"
+    ".pos-6-1 { top: 10px; left: 50%; transform: translateX(-50%); }"
+    ".pos-6-2 { top: 25%; right: 10px; transform: translateY(-50%); }"
+    ".pos-6-3 { bottom: 25%; right: 10px; transform: translateY(50%); }"
+    ".pos-6-4 { bottom: 10px; left: 50%; transform: translateX(-50%); }"
+    ".pos-6-5 { bottom: 25%; left: 10px; transform: translateY(50%); }"
+    ".pos-6-6 { top: 25%; left: 10px; transform: translateY(-50%); }"
+    ".table-circle { border-radius: 50%; height: 65px; width: 65px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid rgba(255,255,255,0.2); position: relative; z-index: 20; color: #fff; font-size: 0.9rem; text-align: center; line-height: 1.2; }"
+    ".table-blue { background: linear-gradient(135deg, #3b82f6, #1d4ed8); box-shadow: 0 0 20px rgba(59,130,246,0.5); }"
+    ".table-red { background: linear-gradient(135deg, #ef4444, #991b1b); box-shadow: 0 0 20px rgba(239,68,68,0.5); }"
+    ".table-yellow { background: linear-gradient(135deg, #FBBF24, #D97706); box-shadow: 0 0 20px rgba(251,191,36,0.5); }"
+    "input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }"
+    "input[type=number] { -moz-appearance: textfield; }"
+)
+
+def _mobile_page(title, body_html, auto_refresh=False):
+    refresh_meta = '<meta http-equiv="refresh" content="20">' if auto_refresh else ''
+    return (f'<!DOCTYPE html><html lang="zh"><head>'
+            f'<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">'
+            f'<title>{title}</title>{refresh_meta}'
+            f'<link href="https://cdn.staticfile.org/twitter-bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">'
+            f'<style>{_MOBILE_CSS}</style>'
+            f'</head><body>'
+            f'<div style="max-width:520px;margin:0 auto;padding:16px 14px 60px;">'
+            f'{body_html}'
+            f'</div>'
+            f'<script src="https://cdn.staticfile.org/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>'
+            f'</body></html>')
+
+def _mobile_match_card(m, state='open'):
+    """构造与全景面板完全一致的对阵小方框。state: 'open'|'pending'|'done'"""
+    t1 = Team.query.get(m.team_a_id)
+    a_players = set(p.strip() for p in ((t1.players if t1 else '') or '').replace('，', ',').split(',') if p.strip())
+    def pc(name):
+        return '#60A5FA' if (name and name.strip() in a_players) else '#FB923C'
+    is_6p = bool(m.pos_p5 and m.pos_p6)
+    if is_6p:
+        seats = (f'<div class="seat-player pos-6-1" style="color:{pc(m.pos_north)}">① {m.pos_north or ""}</div>'
+                 f'<div class="seat-player pos-6-2" style="color:{pc(m.pos_p5)}">② {m.pos_p5 or ""}</div>'
+                 f'<div class="seat-player pos-6-3" style="color:{pc(m.pos_east)}">③ {m.pos_east or ""}</div>'
+                 f'<div class="seat-player pos-6-4" style="color:{pc(m.pos_south)}">④ {m.pos_south or ""}</div>'
+                 f'<div class="seat-player pos-6-5" style="color:{pc(m.pos_p6)}">⑤ {m.pos_p6 or ""}</div>'
+                 f'<div class="seat-player pos-6-6" style="color:{pc(m.pos_west)}">⑥ {m.pos_west or ""}</div>')
+    else:
+        seats = (f'<div class="seat-player pos-4-n" style="color:{pc(m.pos_north)}">[N] {m.pos_north or ""}</div>'
+                 f'<div class="seat-player pos-4-e" style="color:{pc(m.pos_east)}">[E] {m.pos_east or ""}</div>'
+                 f'<div class="seat-player pos-4-s" style="color:{pc(m.pos_south)}">[S] {m.pos_south or ""}</div>'
+                 f'<div class="seat-player pos-4-w" style="color:{pc(m.pos_west)}">[W] {m.pos_west or ""}</div>')
+    circle_cls = 'table-red' if state == 'done' else ('table-yellow' if state == 'pending' else 'table-blue')
+    return (f'<div class="glass-card p-3 shadow-sm mb-3">'
+            f'<div class="seat-wrapper">{seats}'
+            f'<div class="table-circle {circle_cls}">T-{m.table_no}</div></div>'
+            f'<div class="mt-3 text-center py-2" style="background:rgba(0,0,0,0.25);border-radius:8px;">'
+            f'<span style="color:#60A5FA;font-weight:700;">{m.team_a_name}</span>'
+            f' <span style="color:rgba(255,255,255,0.35);">VS</span> '
+            f'<span style="color:#FB923C;font-weight:700;">{m.team_b_name}</span>'
+            f'</div></div>')
+
+@app.route('/mobile/<int:tid>')
+def mobile_entry(tid):
+    t = Tournament.query.get(tid)
+    if not t:
+        return _mobile_page('赛事不存在', '<div style="text-align:center;padding:80px 0;"><div style="font-size:2rem;">❌</div><p style="margin-top:12px;color:rgba(255,255,255,0.4);">赛事不存在 / Tournament not found</p></div>')
+    conf = SystemConfig.query.filter_by(tournament_id=tid).first()
+    if not conf:
+        return _mobile_page('赛事未开始', '<div style="text-align:center;padding:80px 0;"><div style="font-size:2rem;">⏳</div><p style="margin-top:12px;color:rgba(255,255,255,0.4);">赛事尚未开始</p></div>')
+
+    matches = Match.query.filter_by(tournament_id=tid, round_no=conf.current_round).order_by(Match.table_no).all()
+    m_ids = [m.id for m in matches]
+    pending_ids = {p.match_id for p in MobilePending.query.filter(MobilePending.match_id.in_(m_ids)).all()} if m_ids else set()
+
+    cards_html = ''
+    for m in matches:
+        if m.is_completed:
+            bc = '#ef4444'; cc = '#ef4444'
+            badge = f'<span style="color:#ef4444;font-size:0.85rem;">✓ 已录入 &nbsp;<b>{m.score_a}</b>&nbsp;:&nbsp;<b>{m.score_b}</b></span>'
+            wrap_open = '<div style="opacity:0.65;">'
+            wrap_close = '</div>'
+        elif m.id in pending_ids:
+            bc = '#FBBF24'; cc = '#FBBF24'
+            badge = '<span style="color:#FBBF24;font-size:0.85rem;">⏳ 待对手确认 — 点击确认 ▶</span>'
+            wrap_open = f'<a href="/mobile/{tid}/table/{m.id}" style="text-decoration:none;display:block;">'
+            wrap_close = '</a>'
+        else:
+            bc = '#3b82f6'; cc = '#60A5FA'
+            badge = '<span style="color:#60A5FA;font-size:0.85rem;">点击录入成绩 ▶</span>'
+            wrap_open = f'<a href="/mobile/{tid}/table/{m.id}" style="text-decoration:none;display:block;">'
+            wrap_close = '</a>'
+        cards_html += (
+            f'{wrap_open}'
+            f'<div style="background:rgba(30,41,59,0.85);border:2px solid {bc};border-radius:14px;padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;gap:14px;">'
+            f'<div style="width:50px;height:50px;border-radius:50%;background:{bc}22;border:2px solid {bc};display:flex;align-items:center;justify-content:center;font-weight:800;color:{cc};font-size:0.85rem;flex-shrink:0;text-align:center;line-height:1.2;">T-{m.table_no}</div>'
+            f'<div style="flex:1;min-width:0;">'
+            f'<div style="font-weight:700;font-size:0.95rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'
+            f'<span style="color:#60A5FA;">{m.team_a_name}</span>&nbsp;<span style="color:rgba(255,255,255,0.3);">vs</span>&nbsp;<span style="color:#FB923C;">{m.team_b_name}</span>'
+            f'</div>'
+            f'<div style="margin-top:4px;">{badge}</div>'
+            f'</div></div>'
+            f'{wrap_close}'
+        )
+    if not matches:
+        cards_html = '<div style="text-align:center;padding:40px 0;color:rgba(255,255,255,0.35);">本轮暂无对阵信息</div>'
+
+    body = (
+        f'<div style="text-align:center;padding:16px 0 24px;">'
+        f'<div style="font-size:1.5rem;font-weight:900;color:#FBBF24;">🏆 {t.name}</div>'
+        f'<div style="margin-top:8px;font-size:1rem;color:rgba(255,255,255,0.55);">第&nbsp;<span style="color:#60A5FA;font-weight:700;font-size:1.15rem;">{conf.current_round}</span>&nbsp;轮 · 成绩录入</div>'
+        f'<div style="margin-top:6px;font-size:0.72rem;color:rgba(255,255,255,0.22);">页面每20秒自动刷新</div>'
+        f'</div>'
+        f'{cards_html}'
+        f'<div style="text-align:center;margin-top:32px;font-size:0.72rem;color:rgba(255,255,255,0.2);">如有疑问请联系赛事主办方</div>'
+    )
+    return _mobile_page(f'成绩录入 · {t.name}', body, auto_refresh=True)
+
+@app.route('/mobile/<int:tid>/table/<int:mid>', methods=['GET', 'POST'])
+def mobile_table(tid, mid):
+    t = Tournament.query.get(tid)
+    if not t: return redirect(url_for('mobile_entry', tid=tid))
+    m = Match.query.get(mid)
+    if not m or m.tournament_id != tid: return redirect(url_for('mobile_entry', tid=tid))
+
+    if request.method == 'POST':
+        if not m.is_completed and not MobilePending.query.filter_by(match_id=mid).first():
+            try:
+                sa = max(0, int(request.form.get('sa') or 0))
+                sb = max(0, int(request.form.get('sb') or 0))
+                db.session.add(MobilePending(match_id=mid, score_a=sa, score_b=sb,
+                                             submitted_at=datetime.now().strftime('%Y-%m-%d %H:%M')))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+        return redirect(url_for('mobile_table', tid=tid, mid=mid))
+
+    conf = SystemConfig.query.filter_by(tournament_id=tid).first()
+    pending = MobilePending.query.filter_by(match_id=mid).first()
+    round_label = f'第 {conf.current_round} 轮' if conf else ''
+
+    if m.is_completed:
+        card_html = _mobile_match_card(m, 'done')
+        action_html = (
+            f'<div style="background:rgba(239,68,68,0.1);border:1.5px solid #ef4444;border-radius:14px;padding:22px 16px;text-align:center;">'
+            f'<div style="font-size:1.1rem;font-weight:800;color:#ef4444;margin-bottom:12px;">✓ 成绩已录入</div>'
+            f'<div style="font-size:1.1rem;font-weight:800;">'
+            f'<span style="color:#60A5FA;">{m.team_a_name}</span>'
+            f'&nbsp;<span style="color:#FBBF24;font-size:2rem;font-weight:900;margin:0 12px;">{m.score_a}&nbsp;:&nbsp;{m.score_b}</span>'
+            f'<span style="color:#FB923C;">{m.team_b_name}</span>'
+            f'</div>'
+            f'</div>'
+            f'<div style="text-align:center;margin-top:18px;font-size:0.82rem;color:rgba(255,255,255,0.35);">'
+            f'该成绩已经被录入，如有疑问，请联系赛事主办方'
+            f'</div>'
+        )
+    elif pending:
+        card_html = _mobile_match_card(m, 'pending')
+        action_html = (
+            f'<div style="background:rgba(251,191,36,0.08);border:1.5px solid #FBBF24;border-radius:14px;padding:20px 16px;text-align:center;margin-bottom:16px;">'
+            f'<div style="font-size:0.85rem;color:rgba(255,255,255,0.5);margin-bottom:10px;">⏳ 对手已录入成绩，请核实后点击确认</div>'
+            f'<div style="font-size:1.1rem;font-weight:800;">'
+            f'<span style="color:#60A5FA;">{m.team_a_name}</span>'
+            f'&nbsp;<span style="color:#FBBF24;font-size:2rem;font-weight:900;margin:0 10px;">{pending.score_a}&nbsp;:&nbsp;{pending.score_b}</span>'
+            f'<span style="color:#FB923C;">{m.team_b_name}</span>'
+            f'</div>'
+            f'<div style="font-size:0.72rem;color:rgba(255,255,255,0.25);margin-top:8px;">录入时间：{pending.submitted_at}</div>'
+            f'</div>'
+            f'<form action="/mobile/{tid}/table/{mid}/confirm" method="post">'
+            f'<button type="submit" style="width:100%;background:linear-gradient(135deg,#10b981,#059669);border:none;color:#fff;padding:18px;border-radius:14px;font-size:1.15rem;font-weight:800;cursor:pointer;letter-spacing:1px;box-shadow:0 4px 16px rgba(16,185,129,0.4);">✅ 确认成绩</button>'
+            f'</form>'
+            f'<p style="text-align:center;font-size:0.72rem;color:rgba(255,255,255,0.25);margin-top:12px;">'
+            f'确认后成绩将被正式记录，无法撤销<br>如有疑问请勿确认，联系赛事主办方</p>'
+        )
+    else:
+        card_html = _mobile_match_card(m, 'open')
+        action_html = (
+            f'<form action="/mobile/{tid}/table/{mid}" method="post">'
+            f'<div style="margin-bottom:18px;">'
+            f'<label style="display:block;color:#60A5FA;font-weight:700;font-size:0.95rem;margin-bottom:8px;">{m.team_a_name} 级分</label>'
+            f'<input name="sa" type="number" min="0" placeholder="请输入" required'
+            f' style="width:100%;background:rgba(30,41,59,0.9);border:2px solid #3b82f6;border-radius:12px;padding:14px 16px;font-size:1.8rem;font-weight:800;color:#60A5FA;text-align:center;outline:none;">'
+            f'</div>'
+            f'<div style="margin-bottom:26px;">'
+            f'<label style="display:block;color:#FB923C;font-weight:700;font-size:0.95rem;margin-bottom:8px;">{m.team_b_name} 级分</label>'
+            f'<input name="sb" type="number" min="0" placeholder="请输入" required'
+            f' style="width:100%;background:rgba(30,41,59,0.9);border:2px solid #FB923C;border-radius:12px;padding:14px 16px;font-size:1.8rem;font-weight:800;color:#FB923C;text-align:center;outline:none;">'
+            f'</div>'
+            f'<button type="submit" style="width:100%;background:linear-gradient(135deg,#3b82f6,#1d4ed8);border:none;color:#fff;padding:18px;border-radius:14px;font-size:1.05rem;font-weight:800;cursor:pointer;letter-spacing:1px;box-shadow:0 4px 16px rgba(59,130,246,0.4);">📤 提交成绩，等待对手确认</button>'
+            f'</form>'
+            f'<p style="text-align:center;font-size:0.72rem;color:rgba(255,255,255,0.25);margin-top:14px;">提交后，对手扫描同一二维码进入此桌确认成绩</p>'
+        )
+
+    body = (
+        f'<div style="margin-bottom:4px;">'
+        f'<a href="/mobile/{tid}" style="color:rgba(255,255,255,0.4);font-size:0.85rem;text-decoration:none;">‹ 返回桌号列表</a>'
+        f'</div>'
+        f'<div style="text-align:center;padding:10px 0 14px;">'
+        f'<div style="font-size:0.88rem;color:rgba(255,255,255,0.4);">{t.name} · {round_label}</div>'
+        f'</div>'
+        f'{card_html}'
+        f'{action_html}'
+    )
+    return _mobile_page(f'{t.name} · T-{m.table_no}', body)
+
+@app.route('/mobile/<int:tid>/table/<int:mid>/confirm', methods=['POST'])
+def mobile_confirm(tid, mid):
+    t = Tournament.query.get(tid)
+    if not t: return redirect(url_for('mobile_entry', tid=tid))
+    m = Match.query.get(mid)
+    if not m or m.tournament_id != tid: return redirect(url_for('mobile_entry', tid=tid))
+    if m.is_completed: return redirect(url_for('mobile_table', tid=tid, mid=mid))
+
+    pending = MobilePending.query.filter_by(match_id=mid).first()
+    if not pending: return redirect(url_for('mobile_table', tid=tid, mid=mid))
+
+    try:
+        sa, sb = pending.score_a, pending.score_b
+        t1 = Team.query.get(m.team_a_id)
+        t2 = Team.query.get(m.team_b_id)
+        m.score_a = sa; m.score_b = sb
+        t1.round_score += sa; t2.round_score += sb
+        if sa > sb: t1.current_score += 2
+        elif sb > sa: t2.current_score += 2
+        else: t1.current_score += 1; t2.current_score += 1
+        m.is_completed = True
+        t1.history_opponents = (t1.history_opponents + f',{t2.id}').strip(',')
+        t2.history_opponents = (t2.history_opponents + f',{t1.id}').strip(',')
+        db.session.delete(pending)
+        log_act('Mobile Score Confirm', f'Table {m.table_no} | {m.team_a_name}({sa}) : {m.team_b_name}({sb})', tid)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    return redirect(url_for('mobile_table', tid=tid, mid=mid))
 
 @app.route('/export_grouping')
 def export_grouping():
