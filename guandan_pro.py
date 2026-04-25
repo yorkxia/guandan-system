@@ -4,9 +4,11 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import text
 from datetime import datetime
 import random
+import secrets
 import pandas as pd
 import io
 import os
+from datetime import timedelta
 
 app = Flask(__name__)
 app.secret_key = "sv_guandan_v18_ultimate_international_key"
@@ -119,11 +121,21 @@ class MobilePending(db.Model):
     score_b = db.Column(db.Integer, nullable=False)
     submitted_at = db.Column(db.String(30), default='')
 
+class TableLock(db.Model):
+    """移动端录入页锁：用户打开录入表单时加锁，防止对手同时录入；心跳续锁，3分钟无活动自动解锁"""
+    __tablename__ = 'table_lock'
+    id = db.Column(db.Integer, primary_key=True)
+    match_id = db.Column(db.Integer, nullable=False, unique=True)
+    lock_token = db.Column(db.String(64), nullable=False)
+    locked_at = db.Column(db.DateTime, default=datetime.now)
+
+_TABLE_LOCK_TTL = 180  # 锁定超时秒数（3分钟无心跳自动解锁）
+
 # --- 2. 核心拦截器与辅助逻辑 ---
 
 @app.before_request
 def check_frozen():
-    allowed = ['unlock', 'logout', 'login', 'static', 'panorama', 'mobile_entry', 'mobile_table', 'mobile_confirm']
+    allowed = ['unlock', 'logout', 'login', 'static', 'panorama', 'mobile_entry', 'mobile_table', 'mobile_confirm', 'mobile_heartbeat']
     if request.endpoint and request.endpoint not in allowed:
         if session.get('frozen'):
             return redirect(url_for('unlock'))
@@ -170,6 +182,93 @@ def _backtrack_no_rematch(teams, used, pairs, idx):
         used.discard(current.id); used.discard(opp.id)
         pairs.pop()
     return None  # 本路径无解，回溯给上层处理
+
+def _backtrack_norival_strict(teams, used, pairs, idx):
+    """严格回溯：禁止重复对阵 + 禁止同小组出线队对垒（用于'纯循环赛同小组不对垒'模式）"""
+    while idx < len(teams) and teams[idx].id in used:
+        idx += 1
+    if idx >= len(teams):
+        return list(pairs) if len(used) == len(teams) else None
+    current = teams[idx]
+    history = set(current.history_opponents.split(',')) if current.history_opponents else set()
+    for opp in [t for t in teams[idx+1:] if t.id not in used]:
+        if str(opp.id) in history:
+            continue
+        if opp.group_id == current.group_id and current.group_id > 0:
+            continue  # 同小组出线队不对垒
+        used.add(current.id); used.add(opp.id)
+        pairs.append((current, opp))
+        result = _backtrack_norival_strict(teams, used, pairs, idx + 1)
+        if result is not None:
+            return result
+        used.discard(current.id); used.discard(opp.id)
+        pairs.pop()
+    return None
+
+def norival_rr_pairing(teams):
+    """
+    纯循环赛·同小组出线队不对垒配对。
+    第一优先：严格回溯（无重复 + 无同组）。
+    退化：仅无重复回溯，标记被迫同组的对子为 conflicts。
+    返回 (pairs, bye_team, conflicts)
+      pairs    — list of (Team, Team)
+      bye_team — 获拜轮的队，或 None
+      conflicts — list of (Team, Team) 被迫同组对垒的对子（空表示无冲突）
+    """
+    working = list(teams)
+    working.sort(key=lambda x: x.id)
+    bye_team = None
+    if len(working) % 2 == 1:
+        for team in reversed(working):
+            if not team.had_bye:
+                bye_team = team; break
+        if bye_team is None:
+            bye_team = working[-1]
+        working = [t for t in working if t.id != bye_team.id]
+    # 第一优先：严格（无重复 + 无同组）
+    result = _backtrack_norival_strict(working, set(), [], 0)
+    if result is not None:
+        return result, bye_team, []
+    # 退化：仅无重复，标记同组冲突
+    result = _backtrack_no_rematch(working, set(), [], 0)
+    if result is None:
+        result = [(working[i], working[i+1]) for i in range(0, len(working)-1, 2)]
+    conflicts = [(t1, t2) for t1, t2 in result
+                 if t1.group_id == t2.group_id and t1.group_id > 0]
+    return result, bye_team, conflicts
+
+def _render_norival_warning_page(conflicts):
+    """渲染同小组出线队对垒冲突警告页面"""
+    rows = "".join([
+        f'<tr><td class="text-warning fw-bold py-2 px-3">{t1.name}</td>'
+        f'<td class="text-center py-2"><span class="badge bg-danger px-3">⚔️ vs</span></td>'
+        f'<td class="text-warning fw-bold py-2 px-3">{t2.name}</td></tr>'
+        for t1, t2 in conflicts
+    ])
+    content = f"""
+    <div class="container py-5" style="max-width:620px;">
+      <div class="glass-card p-5 text-center">
+        <div style="font-size:3.5rem;margin-bottom:16px;">⚠️</div>
+        <h4 class="text-danger fw-bold mb-3">本轮比赛已经出现出线的同组两个队对垒</h4>
+        <p class="text-white-50 mb-4">当前轮次已无法完全避免同小组出线队之间对垒，以下对阵与"同小组不对垒"原则冲突：</p>
+        <table class="table table-dark table-bordered text-center mb-4">
+          <thead><tr>
+            <th class="text-warning">队伍 A（同组）</th>
+            <th></th>
+            <th class="text-warning">队伍 B（同组）</th>
+          </tr></thead>
+          <tbody>{rows}</tbody>
+        </table>
+        <p class="text-white-50 small mb-4">是否继续进行赛事编排？</p>
+        <div class="d-flex gap-3 justify-content-center flex-wrap">
+          <form method="post" action="/commit_norival">
+            <button type="submit" class="btn btn-danger px-5 py-2 fw-bold rounded-pill fs-5">✅ 继续发布</button>
+          </form>
+          <a href="/matches" class="btn btn-secondary px-5 py-2 fw-bold rounded-pill fs-5">❌ 放弃</a>
+        </div>
+      </div>
+    </div>"""
+    return render_layout(content, active='matches')
 
 def _backtrack_pair(teams, round_no, total_r, used, pairs, idx):
     """回溯配对核心：确保所有队伍都能完成配对，无死锁"""
@@ -1285,8 +1384,12 @@ def matches():
                     <input type="radio" name="pairing_mode" value="roundrobin" style="accent-color:#06b6d4;width:16px;height:16px;">
                     🔁 {T('纯粹轮流循环赛','Pure Round Robin')}
                   </label>
+                  <label style="cursor:pointer;color:#f1f5f9;font-size:0.95rem;display:flex;align-items:center;gap:6px;">
+                    <input type="radio" name="pairing_mode" value="norival_rr" style="accent-color:#f59e0b;width:16px;height:16px;">
+                    🚫 {T('纯循环赛(同小组出线队不对垒)','Round Robin (No Same-Group Matchups)')}
+                  </label>
                 </div>
-                <div style="font-size:0.78rem;color:#64748b;margin-top:8px;">{T('瑞士制：按积分高低配对','Swiss: paired by score')} &nbsp;|&nbsp; {T('纯粹轮流：每队依次与所有其他队各赛一场','Round Robin: each team plays every other team in order')}</div>
+                <div style="font-size:0.78rem;color:#64748b;margin-top:8px;">{T('瑞士制：按积分高低配对','Swiss: paired by score')} &nbsp;|&nbsp; {T('纯粹轮流：每队依次与所有其他队各赛一场','Round Robin: each team plays every other team in order')} &nbsp;|&nbsp; {T('同小组不对垒：纯循环赛但出线同组队之间不对阵','No Same-Group: round robin excluding same-group qualifier matchups')}</div>
               </div>
               <button type="submit" class="btn btn-warning w-100 py-3 fw-bold fs-5 rounded-pill shadow">✅ {T('确认出线赛队，并且开始决赛循环赛编排','Confirm Finalists & Start Finals Draw')}</button>
             </form>
@@ -1947,6 +2050,11 @@ def mobile_entry(tid):
     matches = Match.query.filter_by(tournament_id=tid, round_no=conf.current_round).order_by(Match.table_no).all()
     m_ids = [m.id for m in matches]
     pending_ids = {p.match_id for p in MobilePending.query.filter(MobilePending.match_id.in_(m_ids)).all()} if m_ids else set()
+    # 清理超时锁，再获取有效锁的 match_id 集合
+    _lock_cutoff = datetime.now() - timedelta(seconds=_TABLE_LOCK_TTL)
+    TableLock.query.filter(TableLock.locked_at < _lock_cutoff).delete()
+    db.session.commit()
+    locked_ids = {lk.match_id for lk in TableLock.query.filter(TableLock.match_id.in_(m_ids)).all()} if m_ids else set()
 
     cards_html = ''
     for m in matches:
@@ -1958,6 +2066,11 @@ def mobile_entry(tid):
         elif m.id in pending_ids:
             bc = '#FBBF24'; cc = '#FBBF24'
             badge = '<span style="color:#FBBF24;font-size:0.85rem;">⏳ 待对手确认 — 点击确认 ▶</span>'
+            wrap_open = f'<a href="/mobile/{tid}/table/{m.id}" style="text-decoration:none;display:block;">'
+            wrap_close = '</a>'
+        elif m.id in locked_ids and session.get(f'tlock_{m.id}') not in [lk.lock_token for lk in TableLock.query.filter_by(match_id=m.id).all()]:
+            bc = '#f97316'; cc = '#fb923c'
+            badge = '<span style="color:#fb923c;font-size:0.85rem;">🔒 对手正在录入成绩…</span>'
             wrap_open = f'<a href="/mobile/{tid}/table/{m.id}" style="text-decoration:none;display:block;">'
             wrap_close = '</a>'
         else:
@@ -2005,9 +2118,12 @@ def mobile_table(tid, mid):
                 sb = max(0, int(request.form.get('sb') or 0))
                 db.session.add(MobilePending(match_id=mid, score_a=sa, score_b=sb,
                                              submitted_at=datetime.now().strftime('%Y-%m-%d %H:%M')))
+                # 提交成绩后释放录入锁
+                TableLock.query.filter_by(match_id=mid).delete()
                 db.session.commit()
                 # 标记提交方：该浏览器/手机已提交，不能再看到"确认"按钮
                 session[f'mobile_sub_{mid}'] = True
+                session.pop(f'tlock_{mid}', None)
             except Exception:
                 db.session.rollback()
         return redirect(url_for('mobile_table', tid=tid, mid=mid))
@@ -2017,6 +2133,33 @@ def mobile_table(tid, mid):
     round_label = f'第 {conf.current_round} 轮' if conf else ''
     # 判断当前设备是否为提交方（session 标记）
     i_submitted = session.get(f'mobile_sub_{mid}', False)
+
+    # --- 录入锁逻辑（仅在无 pending、无 completed 时生效）---
+    lock_warning = False
+    if not m.is_completed and not pending:
+        _lock_cutoff = datetime.now() - timedelta(seconds=_TABLE_LOCK_TTL)
+        # 清理超时锁
+        expired = TableLock.query.filter_by(match_id=mid).filter(TableLock.locked_at < _lock_cutoff).first()
+        if expired:
+            db.session.delete(expired)
+            db.session.commit()
+        existing_lock = TableLock.query.filter_by(match_id=mid).first()
+        my_token = session.get(f'tlock_{mid}')
+        if existing_lock:
+            if existing_lock.lock_token == my_token:
+                # 本人的锁，刷新时间戳
+                existing_lock.locked_at = datetime.now()
+                db.session.commit()
+            else:
+                # 别人的锁 → 显示警告
+                lock_warning = True
+        else:
+            # 无锁 → 获取锁
+            new_token = secrets.token_hex(24)
+            session[f'tlock_{mid}'] = new_token
+            db.session.add(TableLock(match_id=mid, lock_token=new_token))
+            db.session.commit()
+            my_token = new_token
 
     if m.is_completed:
         # 成绩已最终确认，清除 session 标记
@@ -2070,6 +2213,17 @@ def mobile_table(tid, mid):
             f'<p style="text-align:center;font-size:0.72rem;color:rgba(255,255,255,0.25);margin-top:12px;">'
             f'确认后成绩将被正式记录，无法撤销<br>如有疑问请勿确认，联系赛事主办方</p>'
         )
+    elif lock_warning:
+        card_html = _mobile_match_card(m, 'open')
+        action_html = (
+            f'<div style="background:rgba(249,115,22,0.12);border:2px solid #f97316;border-radius:14px;padding:28px 18px;text-align:center;">'
+            f'<div style="font-size:2rem;margin-bottom:10px;">🔒</div>'
+            f'<div style="font-size:1.1rem;font-weight:800;color:#fb923c;margin-bottom:12px;">你的参赛对手正在录入比赛成绩</div>'
+            f'<div style="font-size:0.9rem;color:rgba(255,255,255,0.6);line-height:1.6;">请稍后再点击并且确认录入成绩</div>'
+            f'<div style="margin-top:18px;font-size:0.75rem;color:rgba(255,255,255,0.3);">页面将每15秒自动刷新，待对手提交后可进入确认</div>'
+            f'</div>'
+            f'<script>setTimeout(function(){{window.location.reload();}},15000);</script>'
+        )
     else:
         card_html = _mobile_match_card(m, 'open')
         action_html = (
@@ -2087,6 +2241,14 @@ def mobile_table(tid, mid):
             f'<button type="submit" style="width:100%;background:linear-gradient(135deg,#3b82f6,#1d4ed8);border:none;color:#fff;padding:18px;border-radius:14px;font-size:1.05rem;font-weight:800;cursor:pointer;letter-spacing:1px;box-shadow:0 4px 16px rgba(59,130,246,0.4);">📤 提交成绩，等待对手确认</button>'
             f'</form>'
             f'<p style="text-align:center;font-size:0.72rem;color:rgba(255,255,255,0.25);margin-top:14px;">提交后，对手扫描同一二维码进入此桌确认成绩</p>'
+            f'<script>'
+            f'(function(){{'
+            f'  var _hb=setInterval(function(){{'
+            f'    fetch("/mobile/{tid}/table/{mid}/heartbeat",{{method:"POST",headers:{{"Content-Type":"application/json"}}}}).catch(function(){{}});'
+            f'  }},45000);'
+            f'  window.addEventListener("beforeunload",function(){{clearInterval(_hb);}});'
+            f'}})();'
+            f'</script>'
         )
 
     body = (
@@ -2131,6 +2293,21 @@ def mobile_confirm(tid, mid):
         db.session.rollback()
 
     return redirect(url_for('mobile_table', tid=tid, mid=mid))
+
+@app.route('/mobile/<int:tid>/table/<int:mid>/heartbeat', methods=['POST'])
+def mobile_heartbeat(tid, mid):
+    """心跳接口：锁定方每45秒调用一次，刷新锁的时间戳，防止超时释放"""
+    from flask import jsonify
+    my_token = session.get(f'tlock_{mid}')
+    if my_token:
+        lk = TableLock.query.filter_by(match_id=mid, lock_token=my_token).first()
+        if lk:
+            lk.locked_at = datetime.now()
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+    return ('', 204)
 
 @app.route('/export_grouping')
 def export_grouping():
@@ -2642,6 +2819,23 @@ def confirm_finals():
     if not t: return redirect(url_for('setup'))
     conf = get_config(t.id)
     qualifiers = get_group_qualifiers(t.id)
+    pairing_mode = request.form.get('pairing_mode', 'swiss')
+
+    # 纯循环赛(同小组不对垒)：先生成配对检查冲突，不写DB，有冲突则弹出警告页
+    nv_precomputed = None
+    if pairing_mode == 'norival_rr':
+        nv_pairs, nv_bye, nv_conflicts = norival_rr_pairing(qualifiers)
+        if nv_conflicts:
+            session['pending_norival'] = {
+                'type': 'finals_start', 'tournament_id': t.id,
+                'qualifier_ids': [q.id for q in qualifiers], 'round_no': 1,
+                'pairs': [[a.id, b.id] for a, b in nv_pairs],
+                'bye_id': nv_bye.id if nv_bye else None,
+                'conflicts': [[a.name, b.name] for a, b in nv_conflicts],
+            }
+            return _render_norival_warning_page(nv_conflicts)
+        nv_precomputed = (nv_pairs, nv_bye)  # 无冲突，直接使用
+
     # 标记晋级队伍，重置决赛积分（保留历史）
     for team in Team.query.filter_by(tournament_id=t.id).all():
         team.is_finalist = False
@@ -2650,7 +2844,6 @@ def confirm_finals():
         q.current_score = 0; q.round_score = 0
         q.history_opponents = ""; q.had_bye = False
         q.seat_ns_count = 0; q.seat_ew_count = 0
-    pairing_mode = request.form.get('pairing_mode', 'swiss')
     conf.stage = 'finals'
     conf.current_round = 1
     conf.pairing_mode = pairing_mode
@@ -2658,7 +2851,9 @@ def confirm_finals():
     # 生成决赛第一轮
     bye_team = None
     working = list(qualifiers)
-    if pairing_mode == 'roundrobin':
+    if pairing_mode == 'norival_rr':
+        result, bye_team = nv_precomputed
+    elif pairing_mode == 'roundrobin':
         working.sort(key=lambda x: x.id)
         if len(working) % 2 == 1:
             for team in reversed(working):
@@ -2689,10 +2884,93 @@ def confirm_finals():
     db.session.commit()
     return redirect(url_for('matches'))
 
+@app.route('/commit_norival', methods=['POST'])
+def commit_norival():
+    """用户点击'继续发布'后提交已生成（带同组冲突）的对阵安排"""
+    pending = session.pop('pending_norival', None)
+    if not pending:
+        return redirect(url_for('matches'))
+    t = get_active_t()
+    if not t or t.id != pending.get('tournament_id'):
+        return redirect(url_for('matches'))
+    conf = get_config(t.id)
+    pair_ids = pending['pairs']
+    bye_id = pending.get('bye_id')
+    round_no = pending['round_no']
+    team_map = {tm.id: tm for tm in Team.query.filter_by(tournament_id=t.id).all()}
+
+    if pending['type'] == 'finals_start':
+        # 标记晋级队伍、重置决赛积分
+        for tm in team_map.values():
+            tm.is_finalist = False
+        for qid in pending.get('qualifier_ids', []):
+            if qid in team_map:
+                q = team_map[qid]
+                q.is_finalist = True; q.current_score = 0; q.round_score = 0
+                q.history_opponents = ""; q.had_bye = False
+                q.seat_ns_count = 0; q.seat_ew_count = 0
+        conf.stage = 'finals'; conf.current_round = 1; conf.pairing_mode = 'norival_rr'
+        db.session.flush()
+    elif pending['type'] == 'next_round':
+        conf.current_round = round_no
+        db.session.flush()
+
+    if bye_id and bye_id in team_map:
+        bm = team_map[bye_id]
+        bm.had_bye = True; bm.current_score += 2
+        log_act("Bye Round", f"norival_rr R{round_no} bye: {bm.name} (+2)", t.id)
+
+    for i, (id1, id2) in enumerate(pair_ids):
+        t1, t2 = team_map[id1], team_map[id2]
+        p1 = [x.strip() for x in t1.players.replace('，', ',').split(',')]
+        p2 = [x.strip() for x in t2.players.replace('，', ',').split(',')]
+        is_6p = len(p1) >= 3 and len(p2) >= 3
+        seats = assign_seats(t1, t2, p1, p2, is_6p)
+        db.session.add(Match(tournament_id=t.id, round_no=round_no, table_no=i+1,
+                             team_a_id=t1.id, team_b_id=t2.id,
+                             team_a_name=t1.name, team_b_name=t2.name,
+                             group_id=0, **seats))
+    conflicts_str = ", ".join([f"{a} vs {b}" for a, b in pending.get('conflicts', [])])
+    log_act("norival_rr confirmed", f"R{round_no} 同组冲突已确认: {conflicts_str}", t.id)
+    db.session.commit()
+    return redirect(url_for('matches'))
+
 @app.route('/next_r')
 def next_r():
     t = get_active_t()
     conf = get_config(t.id)
+
+    # 纯循环赛(同小组不对垒) 决赛模式：先生成配对检查冲突，再决定是否自增轮次
+    if conf.mode == 1 and conf.stage == 'finals' and (conf.pairing_mode or '') == 'norival_rr':
+        new_round = conf.current_round + 1
+        finalist_ids_q = [tm.id for tm in Team.query.filter_by(tournament_id=t.id, is_finalist=True).all()]
+        nv_teams = Team.query.filter(Team.id.in_(finalist_ids_q)).all()
+        nv_pairs, nv_bye, nv_conflicts = norival_rr_pairing(nv_teams)
+        if nv_conflicts:
+            session['pending_norival'] = {
+                'type': 'next_round', 'tournament_id': t.id, 'round_no': new_round,
+                'pairs': [[a.id, b.id] for a, b in nv_pairs],
+                'bye_id': nv_bye.id if nv_bye else None,
+                'conflicts': [[a.name, b.name] for a, b in nv_conflicts],
+            }
+            return _render_norival_warning_page(nv_conflicts)
+        # 无冲突，直接提交本轮
+        conf.current_round = new_round
+        if nv_bye:
+            nv_bye.had_bye = True; nv_bye.current_score += 2
+            log_act("Bye Round", f"Finals R{new_round} norival bye: {nv_bye.name} (+2)", t.id)
+        for i, (t1, t2) in enumerate(nv_pairs):
+            p1 = [x.strip() for x in t1.players.replace('，', ',').split(',')]
+            p2 = [x.strip() for x in t2.players.replace('，', ',').split(',')]
+            is_6p = len(p1) >= 3 and len(p2) >= 3
+            seats = assign_seats(t1, t2, p1, p2, is_6p)
+            db.session.add(Match(tournament_id=t.id, round_no=new_round, table_no=i+1,
+                                 team_a_id=t1.id, team_b_id=t2.id,
+                                 team_a_name=t1.name, team_b_name=t2.name, group_id=0, **seats))
+        log_act("Next Round (Finals norival_rr)", f"Round {new_round}", t.id)
+        db.session.commit()
+        return redirect(url_for('matches'))
+
     conf.current_round += 1
     if conf.mode == 1 and conf.stage == 'group':
         # 小组赛模式：按配对方式对每个小组分别配对
@@ -2819,6 +3097,12 @@ def init_db():
         except Exception: db.session.rollback()
         try: db.session.execute(text("ALTER TABLE match ADD COLUMN group_id INTEGER DEFAULT 0")); db.session.commit()
         except Exception: db.session.rollback()
+        # 启动时清除所有遗留的录入锁（防止上次异常退出留下死锁）
+        try:
+            TableLock.query.delete()
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
         if not User.query.filter_by(username='admin').first():
             db.session.add(User(username='admin', password=generate_password_hash('123')))
             db.session.commit()
