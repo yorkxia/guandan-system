@@ -3,6 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import text
 from datetime import datetime
+import json
 import random
 import secrets
 import pandas as pd
@@ -62,6 +63,7 @@ class SystemConfig(db.Model):
     advance_per_group = db.Column(db.Integer, default=0)# 每组出线名额
     stage = db.Column(db.String(20), default=None)      # 'group' | 'finals' | None
     pairing_mode = db.Column(db.String(20), default='swiss')  # 'swiss' | 'roundrobin'
+    finals_schedule = db.Column(db.Text, nullable=True)       # norival_rr 预排全程赛程(JSON)
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -205,9 +207,112 @@ def _backtrack_norival_strict(teams, used, pairs, idx):
         pairs.pop()
     return None
 
+def precompute_norival_optimal_schedule(teams):
+    """
+    一次性预排 norival_rr 决赛全程赛制，将同组对垒尽量推迟至最后几轮。
+    返回: list of {'pairs': [[id1, id2], ...], 'bye_id': int|None}
+    索引 0=第1轮，索引 1=第2轮，以此类推。
+    """
+    groups = {}
+    for t in teams:
+        gid = t.group_id if t.group_id > 0 else 0
+        groups.setdefault(gid, []).append(t)
+    group_list = [sorted(g, key=lambda x: x.id)
+                  for g in sorted(groups.values(), key=lambda g: g[0].group_id)]
+    k = len(group_list)
+    if all(len(g) == 2 for g in group_list) and k >= 2 and k % 2 == 0:
+        return _optimal_pairs_of_2_schedule(group_list)
+    return _circle_method_sorted_schedule(teams)
+
+
+def _optimal_pairs_of_2_schedule(group_list):
+    """
+    最优算法：k 组各2队（k 为偶数）。
+    每个组级轮次展开为"平行轮"+"交叉轮"，最后一轮安排全部同组对垒。
+    保证第1至第(2k-2)轮完全无同组对垒，第(2k-1)轮全部同组对垒。
+    """
+    k = len(group_list)
+    schedule = []
+    g_pos = list(range(k))  # g_pos[0] 全程固定
+
+    for _ in range(k - 1):
+        g_pairs = [(g_pos[i], g_pos[k - 1 - i]) for i in range(k // 2)]
+
+        # 平行轮：g_i[0] vs g_j[0]，g_i[1] vs g_j[1]
+        parallel = []
+        for gi, gj in g_pairs:
+            parallel.append([group_list[gi][0].id, group_list[gj][0].id])
+            parallel.append([group_list[gi][1].id, group_list[gj][1].id])
+        schedule.append({'pairs': parallel, 'bye_id': None})
+
+        # 交叉轮：g_i[0] vs g_j[1]，g_i[1] vs g_j[0]
+        crossed = []
+        for gi, gj in g_pairs:
+            crossed.append([group_list[gi][0].id, group_list[gj][1].id])
+            crossed.append([group_list[gi][1].id, group_list[gj][0].id])
+        schedule.append({'pairs': crossed, 'bye_id': None})
+
+        # 旋转：保持 g_pos[0] 不动，末位移至第二位
+        g_pos = [g_pos[0]] + [g_pos[-1]] + g_pos[1:-1]
+
+    # 最后一轮：全部同组对垒
+    schedule.append({'pairs': [[g[0].id, g[1].id] for g in group_list], 'bye_id': None})
+    return schedule
+
+
+def _circle_method_sorted_schedule(teams):
+    """
+    通用算法（圆形法 + 按冲突数升序排列）。
+    适用于奇数组或各组人数不等的情况。同组对阵少的轮次优先排在前面。
+    """
+    n_orig = len(teams)
+    bye_needed = (n_orig % 2 == 1)
+
+    # 按组交叉排序，减少圆形法早期产生的同组配对
+    groups = {}
+    for t in teams:
+        gid = t.group_id if t.group_id > 0 else 0
+        groups.setdefault(gid, []).append(t)
+    group_vals = sorted(groups.values(), key=lambda g: g[0].group_id)
+    max_sz = max(len(g) for g in group_vals)
+    interleaved = []
+    for i in range(max_sz):
+        for g in group_vals:
+            if i < len(g):
+                interleaved.append(g[i])
+    if bye_needed:
+        interleaved.append(None)
+
+    n = len(interleaved)
+    positions = list(interleaved)  # positions[0] 全程固定
+    raw_rounds = []
+
+    for _ in range(n - 1):
+        pairs, bye_team = [], None
+        for i in range(n // 2):
+            t1, t2 = positions[i], positions[n - 1 - i]
+            if t1 is None:
+                bye_team = t2
+            elif t2 is None:
+                bye_team = t1
+            else:
+                pairs.append([t1.id, t2.id])
+        raw_rounds.append({'pairs': pairs, 'bye_id': bye_team.id if bye_team else None})
+        positions = [positions[0]] + [positions[-1]] + positions[1:-1]
+
+    gid_map = {t.id: (t.group_id if t.group_id > 0 else 0) for t in teams}
+
+    def conflict_count(rnd):
+        return sum(1 for a, b in rnd['pairs']
+                   if gid_map.get(a, 0) == gid_map.get(b, 0) and gid_map.get(a, 0) > 0)
+
+    raw_rounds.sort(key=conflict_count)
+    return raw_rounds
+
+
 def norival_rr_pairing(teams):
     """
-    纯循环赛·同小组出线队不对垒配对。
+    纯循环赛·同小组出线队不对垒配对（兼容旧赛事逐轮调用）。
     第一优先：严格回溯（无重复 + 无同组）。
     退化：仅无重复回溯，标记被迫同组的对子为 conflicts。
     返回 (pairs, bye_team, conflicts)
@@ -2821,20 +2926,29 @@ def confirm_finals():
     qualifiers = get_group_qualifiers(t.id)
     pairing_mode = request.form.get('pairing_mode', 'swiss')
 
-    # 纯循环赛(同小组不对垒)：先生成配对检查冲突，不写DB，有冲突则弹出警告页
+    # 纯循环赛(同小组不对垒)：预排全程赛制，将同组对垒推迟至最后轮
     nv_precomputed = None
+    nv_full_schedule = None
     if pairing_mode == 'norival_rr':
-        nv_pairs, nv_bye, nv_conflicts = norival_rr_pairing(qualifiers)
-        if nv_conflicts:
+        full_schedule = precompute_norival_optimal_schedule(qualifiers)
+        nv_full_schedule = full_schedule
+        q_map = {q.id: q for q in qualifiers}
+        r1 = full_schedule[0]
+        r1_pairs_obj = [(q_map[a], q_map[b]) for a, b in r1['pairs']]
+        r1_bye = q_map.get(r1['bye_id']) if r1.get('bye_id') else None
+        r1_conflicts = [(t1, t2) for t1, t2 in r1_pairs_obj
+                        if t1.group_id == t2.group_id and t1.group_id > 0]
+        if r1_conflicts:
             session['pending_norival'] = {
                 'type': 'finals_start', 'tournament_id': t.id,
                 'qualifier_ids': [q.id for q in qualifiers], 'round_no': 1,
-                'pairs': [[a.id, b.id] for a, b in nv_pairs],
-                'bye_id': nv_bye.id if nv_bye else None,
-                'conflicts': [[a.name, b.name] for a, b in nv_conflicts],
+                'pairs': r1['pairs'],
+                'bye_id': r1.get('bye_id'),
+                'conflicts': [[t1.name, t2.name] for t1, t2 in r1_conflicts],
+                'full_schedule_json': json.dumps(full_schedule),
             }
-            return _render_norival_warning_page(nv_conflicts)
-        nv_precomputed = (nv_pairs, nv_bye)  # 无冲突，直接使用
+            return _render_norival_warning_page(r1_conflicts)
+        nv_precomputed = (r1_pairs_obj, r1_bye)
 
     # 标记晋级队伍，重置决赛积分（保留历史）
     for team in Team.query.filter_by(tournament_id=t.id).all():
@@ -2847,6 +2961,8 @@ def confirm_finals():
     conf.stage = 'finals'
     conf.current_round = 1
     conf.pairing_mode = pairing_mode
+    if nv_full_schedule:
+        conf.finals_schedule = json.dumps(nv_full_schedule)
     db.session.flush()
     # 生成决赛第一轮
     bye_team = None
@@ -2910,6 +3026,8 @@ def commit_norival():
                 q.history_opponents = ""; q.had_bye = False
                 q.seat_ns_count = 0; q.seat_ew_count = 0
         conf.stage = 'finals'; conf.current_round = 1; conf.pairing_mode = 'norival_rr'
+        if 'full_schedule_json' in pending:
+            conf.finals_schedule = pending['full_schedule_json']
         db.session.flush()
     elif pending['type'] == 'next_round':
         conf.current_round = round_no
@@ -2940,9 +3058,54 @@ def next_r():
     t = get_active_t()
     conf = get_config(t.id)
 
-    # 纯循环赛(同小组不对垒) 决赛模式：先生成配对检查冲突，再决定是否自增轮次
+    # 纯循环赛(同小组不对垒) 决赛模式
     if conf.mode == 1 and conf.stage == 'finals' and (conf.pairing_mode or '') == 'norival_rr':
         new_round = conf.current_round + 1
+
+        # --- 新方式：使用预排全程赛制 ---
+        if conf.finals_schedule:
+            try:
+                full_schedule = json.loads(conf.finals_schedule)
+                round_idx = conf.current_round  # full_schedule[0]=第1轮已用，取[current_round]
+                if round_idx < len(full_schedule):
+                    rnd = full_schedule[round_idx]
+                    pair_ids_list = rnd['pairs']   # [[id1, id2], ...]
+                    bye_id = rnd.get('bye_id')
+                    all_ids = [i for pair in pair_ids_list for i in pair]
+                    if bye_id:
+                        all_ids.append(bye_id)
+                    team_map = {tm.id: tm for tm in Team.query.filter(Team.id.in_(all_ids)).all()}
+                    nv_pairs = [(team_map[a], team_map[b]) for a, b in pair_ids_list]
+                    nv_bye_t = team_map.get(bye_id)
+                    nv_conflicts = [(t1, t2) for t1, t2 in nv_pairs
+                                    if t1.group_id == t2.group_id and t1.group_id > 0]
+                    if nv_conflicts:
+                        session['pending_norival'] = {
+                            'type': 'next_round', 'tournament_id': t.id, 'round_no': new_round,
+                            'pairs': pair_ids_list,
+                            'bye_id': bye_id,
+                            'conflicts': [[t1.name, t2.name] for t1, t2 in nv_conflicts],
+                        }
+                        return _render_norival_warning_page(nv_conflicts)
+                    conf.current_round = new_round
+                    if nv_bye_t:
+                        nv_bye_t.had_bye = True; nv_bye_t.current_score += 2
+                        log_act("Bye Round", f"Finals R{new_round} norival bye: {nv_bye_t.name} (+2)", t.id)
+                    for i, (t1, t2) in enumerate(nv_pairs):
+                        p1 = [x.strip() for x in t1.players.replace('，', ',').split(',')]
+                        p2 = [x.strip() for x in t2.players.replace('，', ',').split(',')]
+                        is_6p = len(p1) >= 3 and len(p2) >= 3
+                        seats = assign_seats(t1, t2, p1, p2, is_6p)
+                        db.session.add(Match(tournament_id=t.id, round_no=new_round, table_no=i+1,
+                                             team_a_id=t1.id, team_b_id=t2.id,
+                                             team_a_name=t1.name, team_b_name=t2.name, group_id=0, **seats))
+                    log_act("Next Round (Finals norival_rr)", f"Round {new_round} (预排)", t.id)
+                    db.session.commit()
+                    return redirect(url_for('matches'))
+            except Exception:
+                pass  # JSON 解析失败，回退到旧逻辑
+
+        # --- 旧方式（兼容无预排赛程的已有赛事）---
         finalist_ids_q = [tm.id for tm in Team.query.filter_by(tournament_id=t.id, is_finalist=True).all()]
         nv_teams = Team.query.filter(Team.id.in_(finalist_ids_q)).all()
         nv_pairs, nv_bye, nv_conflicts = norival_rr_pairing(nv_teams)
@@ -2954,7 +3117,6 @@ def next_r():
                 'conflicts': [[a.name, b.name] for a, b in nv_conflicts],
             }
             return _render_norival_warning_page(nv_conflicts)
-        # 无冲突，直接提交本轮
         conf.current_round = new_round
         if nv_bye:
             nv_bye.had_bye = True; nv_bye.current_score += 2
@@ -3096,6 +3258,8 @@ def init_db():
         try: db.session.execute(text("ALTER TABLE team ADD COLUMN is_finalist BOOLEAN DEFAULT FALSE")); db.session.commit()
         except Exception: db.session.rollback()
         try: db.session.execute(text("ALTER TABLE match ADD COLUMN group_id INTEGER DEFAULT 0")); db.session.commit()
+        except Exception: db.session.rollback()
+        try: db.session.execute(text("ALTER TABLE system_config ADD COLUMN finals_schedule TEXT")); db.session.commit()
         except Exception: db.session.rollback()
         # 启动时清除所有遗留的录入锁（防止上次异常退出留下死锁）
         try:
