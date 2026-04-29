@@ -10,3 +10,4 @@ instance/
 *.jpg
 *.png
 .env
+backups/
