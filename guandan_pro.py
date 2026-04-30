@@ -2485,13 +2485,34 @@ def export_grouping():
         for m in ms_sorted:
             ta = team_map.get(m.team_a_id)
             tb = team_map.get(m.team_b_id)
-            export_data.append({
-                "桌号": m.table_no,
-                "队伍A": m.team_a_name,
-                "队伍A选手": ta.players if ta else "",
-                "队伍B": m.team_b_name,
-                "队伍B选手": tb.players if tb else "",
-            })
+            is_6p = bool(m.pos_p5 and m.pos_p6)
+            if is_6p:
+                row = {
+                    "桌号": m.table_no,
+                    "队伍A": m.team_a_name,
+                    "队伍A选手": ta.players if ta else "",
+                    "队伍B": m.team_b_name,
+                    "队伍B选手": tb.players if tb else "",
+                    "① 北": m.pos_north or "",
+                    "②": m.pos_p5 or "",
+                    "③ 东": m.pos_east or "",
+                    "④ 南": m.pos_south or "",
+                    "⑤": m.pos_p6 or "",
+                    "⑥ 西": m.pos_west or "",
+                }
+            else:
+                row = {
+                    "桌号": m.table_no,
+                    "队伍A": m.team_a_name,
+                    "队伍A选手": ta.players if ta else "",
+                    "队伍B": m.team_b_name,
+                    "队伍B选手": tb.players if tb else "",
+                    "北(N)": m.pos_north or "",
+                    "东(E)": m.pos_east or "",
+                    "南(S)": m.pos_south or "",
+                    "西(W)": m.pos_west or "",
+                }
+            export_data.append(row)
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name=f"第{conf.current_round}轮分组")
         output.seek(0)
